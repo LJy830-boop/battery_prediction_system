@@ -1,0 +1,1327 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>电池寿命预测系统</title>
+    <!-- Bootstrap CSS -->
+    <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.1.3/dist/css/bootstrap.min.css" rel="stylesheet">
+    <!-- Font Awesome -->
+    <link href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0/css/all.min.css" rel="stylesheet">
+    <style>
+        body {
+            padding-top: 20px;
+            padding-bottom: 20px;
+            background-color: #f8f9fa;
+        }
+        .header {
+            padding-bottom: 20px;
+            border-bottom: 1px solid #e5e5e5;
+            margin-bottom: 30px;
+        }
+        .step-container {
+            margin-bottom: 30px;
+            padding: 20px;
+            border-radius: 5px;
+            background-color: #fff;
+            box-shadow: 0 0.125rem 0.25rem rgba(0, 0, 0, 0.075);
+        }
+        .step-header {
+            margin-bottom: 20px;
+            padding-bottom: 10px;
+            border-bottom: 1px solid #e5e5e5;
+        }
+        .step-content {
+            margin-bottom: 20px;
+        }
+        .step-footer {
+            padding-top: 10px;
+            border-top: 1px solid #e5e5e5;
+        }
+        .result-container {
+            margin-top: 20px;
+            padding: 15px;
+            border-radius: 5px;
+            background-color: #f8f9fa;
+        }
+        .plot-container {
+            margin-top: 20px;
+            text-align: center;
+        }
+        .plot-container img {
+            max-width: 100%;
+            height: auto;
+            border-radius: 5px;
+            box-shadow: 0 0.125rem 0.25rem rgba(0, 0, 0, 0.075);
+        }
+        .nav-tabs {
+            margin-bottom: 20px;
+        }
+        .tab-pane {
+            padding: 20px;
+            background-color: #fff;
+            border: 1px solid #dee2e6;
+            border-top: none;
+            border-radius: 0 0 5px 5px;
+        }
+        .loading {
+            display: none;
+            text-align: center;
+            margin: 20px 0;
+        }
+        .loading i {
+            font-size: 2rem;
+            color: #007bff;
+        }
+        .alert {
+            margin-top: 20px;
+        }
+        .table-responsive {
+            margin-top: 20px;
+        }
+        .btn-action {
+            margin-right: 5px;
+            margin-bottom: 5px;
+        }
+        .step-navigation {
+            margin-top: 30px;
+            text-align: center;
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <div class="header">
+            <div class="row">
+                <div class="col-md-8">
+                    <h1>电池寿命预测系统</h1>
+                    <p class="lead">基于机器学习的电池SOH和RUL预测平台</p>
+                </div>
+                <div class="col-md-4 text-end">
+                    <img src="https://cdn-icons-png.flaticon.com/512/3043/3043888.png" alt="Battery Icon" height="80">
+                </div>
+            </div>
+        </div>
+
+        <div class="row">
+            <div class="col-md-3">
+                <div class="list-group">
+                    <a href="#step1" class="list-group-item list-group-item-action active" data-bs-toggle="list">
+                        <i class="fas fa-upload me-2"></i> 1. 数据上传
+                    </a>
+                    <a href="#step2" class="list-group-item list-group-item-action" data-bs-toggle="list">
+                        <i class="fas fa-broom me-2"></i> 2. 数据预处理
+                    </a>
+                    <a href="#step3" class="list-group-item list-group-item-action" data-bs-toggle="list">
+                        <i class="fas fa-chart-bar me-2"></i> 3. 探索性分析
+                    </a>
+                    <a href="#step4" class="list-group-item list-group-item-action" data-bs-toggle="list">
+                        <i class="fas fa-puzzle-piece me-2"></i> 4. 特征提取
+                    </a>
+                    <a href="#step5" class="list-group-item list-group-item-action" data-bs-toggle="list">
+                        <i class="fas fa-cogs me-2"></i> 5. 模型训练
+                    </a>
+                    <a href="#step6" class="list-group-item list-group-item-action" data-bs-toggle="list">
+                        <i class="fas fa-chart-line me-2"></i> 6. 预测与评估
+                    </a>
+                    <a href="#step7" class="list-group-item list-group-item-action" data-bs-toggle="list">
+                        <i class="fas fa-sliders-h me-2"></i> 7. 模型优化
+                    </a>
+                </div>
+            </div>
+
+            <div class="col-md-9">
+                <div class="tab-content">
+                    <!-- 步骤1：数据上传 -->
+                    <div class="tab-pane fade show active" id="step1">
+                        <div class="step-container">
+                            <div class="step-header">
+                                <h3><i class="fas fa-upload me-2"></i> 步骤1：数据上传</h3>
+                                <p>上传电池数据文件（支持CSV、Excel格式）</p>
+                            </div>
+                            <div class="step-content">
+                                <form id="uploadForm" enctype="multipart/form-data">
+                                    <div class="mb-3">
+                                        <label for="dataFile" class="form-label">选择数据文件</label>
+                                        <input class="form-control" type="file" id="dataFile" name="file" accept=".csv,.xlsx,.xls">
+                                        <div class="form-text">支持的文件格式：CSV、Excel (.xlsx, .xls)</div>
+                                    </div>
+                                    <button type="submit" class="btn btn-primary">
+                                        <i class="fas fa-upload me-2"></i> 上传文件
+                                    </button>
+                                </form>
+
+                                <div class="loading" id="uploadLoading">
+                                    <i class="fas fa-spinner fa-spin"></i>
+                                    <p>正在上传文件，请稍候...</p>
+                                </div>
+
+                                <div id="uploadResult" class="result-container" style="display: none;">
+                                    <h5>数据预览</h5>
+                                    <div class="table-responsive" id="dataPreview"></div>
+                                    <div class="mt-3">
+                                        <p><strong>行数：</strong> <span id="rowCount"></span></p>
+                                        <p><strong>列：</strong> <span id="columnList"></span></p>
+                                    </div>
+                                </div>
+                            </div>
+                            <div class="step-footer">
+                                <button class="btn btn-success float-end" id="goToStep2" disabled>
+                                    下一步 <i class="fas fa-arrow-right ms-2"></i>
+                                </button>
+                            </div>
+                        </div>
+                    </div>
+
+                    <!-- 步骤2：数据预处理 -->
+                    <div class="tab-pane fade" id="step2">
+                        <div class="step-container">
+                            <div class="step-header">
+                                <h3><i class="fas fa-broom me-2"></i> 步骤2：数据预处理</h3>
+                                <p>清洗和准备数据</p>
+                            </div>
+                            <div class="step-content">
+                                <form id="preprocessForm">
+                                    <div class="mb-3 form-check">
+                                        <input type="checkbox" class="form-check-input" id="dropNa" name="drop_na" checked>
+                                        <label class="form-check-label" for="dropNa">删除缺失值</label>
+                                    </div>
+                                    <div class="mb-3 form-check">
+                                        <input type="checkbox" class="form-check-input" id="dropDuplicates" name="drop_duplicates" checked>
+                                        <label class="form-check-label" for="dropDuplicates">删除重复值</label>
+                                    </div>
+                                    <button type="submit" class="btn btn-primary">
+                                        <i class="fas fa-broom me-2"></i> 预处理数据
+                                    </button>
+                                </form>
+
+                                <div class="loading" id="preprocessLoading">
+                                    <i class="fas fa-spinner fa-spin"></i>
+                                    <p>正在预处理数据，请稍候...</p>
+                                </div>
+
+                                <div id="preprocessResult" class="result-container" style="display: none;">
+                                    <h5>预处理后的数据预览</h5>
+                                    <div class="table-responsive" id="preprocessedDataPreview"></div>
+                                    <div class="mt-3">
+                                        <p><strong>行数：</strong> <span id="preprocessedRowCount"></span></p>
+                                    </div>
+                                </div>
+                            </div>
+                            <div class="step-footer">
+                                <button class="btn btn-secondary" id="backToStep1">
+                                    <i class="fas fa-arrow-left me-2"></i> 上一步
+                                </button>
+                                <button class="btn btn-success float-end" id="goToStep3" disabled>
+                                    下一步 <i class="fas fa-arrow-right ms-2"></i>
+                                </button>
+                            </div>
+                        </div>
+                    </div>
+
+                    <!-- 步骤3：探索性数据分析 -->
+                    <div class="tab-pane fade" id="step3">
+                        <div class="step-container">
+                            <div class="step-header">
+                                <h3><i class="fas fa-chart-bar me-2"></i> 步骤3：探索性数据分析</h3>
+                                <p>分析和可视化数据</p>
+                            </div>
+                            <div class="step-content">
+                                <button id="analyzeBtn" class="btn btn-primary">
+                                    <i class="fas fa-chart-bar me-2"></i> 分析数据
+                                </button>
+
+                                <div class="loading" id="analyzeLoading">
+                                    <i class="fas fa-spinner fa-spin"></i>
+                                    <p>正在分析数据，请稍候...</p>
+                                </div>
+
+                                <div id="analyzeResult" class="result-container" style="display: none;">
+                                    <ul class="nav nav-tabs" id="analyzeTabs">
+                                        <li class="nav-item">
+                                            <a class="nav-link active" data-bs-toggle="tab" href="#summaryTab">数据摘要</a>
+                                        </li>
+                                        <li class="nav-item">
+                                            <a class="nav-link" data-bs-toggle="tab" href="#distTab">数据分布</a>
+                                        </li>
+                                        <li class="nav-item">
+                                            <a class="nav-link" data-bs-toggle="tab" href="#corrTab">相关性矩阵</a>
+                                        </li>
+                                        <li class="nav-item" id="capacityTabItem" style="display: none;">
+                                            <a class="nav-link" data-bs-toggle="tab" href="#capacityTab">容量退化曲线</a>
+                                        </li>
+                                    </ul>
+                                    <div class="tab-content">
+                                        <div class="tab-pane fade show active" id="summaryTab">
+                                            <h5>数据摘要</h5>
+                                            <div class="table-responsive" id="summaryTable"></div>
+                                        </div>
+                                        <div class="tab-pane fade" id="distTab">
+                                            <h5>数据分布</h5>
+                                            <div class="plot-container">
+                                                <img id="distPlot" src="" alt="数据分布图">
+                                            </div>
+                                        </div>
+                                        <div class="tab-pane fade" id="corrTab">
+                                            <h5>相关性矩阵</h5>
+                                            <div class="plot-container">
+                                                <img id="corrPlot" src="" alt="相关性矩阵图">
+                                            </div>
+                                        </div>
+                                        <div class="tab-pane fade" id="capacityTab">
+                                            <h5>容量退化曲线</h5>
+                                            <div class="plot-container">
+                                                <img id="capacityPlot" src="" alt="容量退化曲线图">
+                                            </div>
+                                        </div>
+                                    </div>
+                                </div>
+                            </div>
+                            <div class="step-footer">
+                                <button class="btn btn-secondary" id="backToStep2">
+                                    <i class="fas fa-arrow-left me-2"></i> 上一步
+                                </button>
+                                <button class="btn btn-success float-end" id="goToStep4" disabled>
+                                    下一步 <i class="fas fa-arrow-right ms-2"></i>
+                                </button>
+                            </div>
+                        </div>
+                    </div>
+
+                    <!-- 步骤4：特征提取 -->
+                    <div class="tab-pane fade" id="step4">
+                        <div class="step-container">
+                            <div class="step-header">
+                                <h3><i class="fas fa-puzzle-piece me-2"></i> 步骤4：特征提取</h3>
+                                <p>从原始数据中提取特征</p>
+                            </div>
+                            <div class="step-content">
+                                <form id="featureForm">
+                                    <div class="row">
+                                        <div class="col-md-6">
+                                            <div class="mb-3">
+                                                <label for="cycleCol" class="form-label">循环次数列</label>
+                                                <select class="form-select" id="cycleCol" name="cycle_col" required>
+                                                    <!-- 动态填充 -->
+                                                </select>
+                                            </div>
+                                        </div>
+                                        <div class="col-md-6">
+                                            <div class="mb-3">
+                                                <label for="voltageCol" class="form-label">电压列</label>
+                                                <select class="form-select" id="voltageCol" name="voltage_col" required>
+                                                    <!-- 动态填充 -->
+                                                </select>
+                                            </div>
+                                        </div>
+                                    </div>
+                                    <div class="row">
+                                        <div class="col-md-6">
+                                            <div class="mb-3">
+                                                <label for="currentCol" class="form-label">电流列</label>
+                                                <select class="form-select" id="currentCol" name="current_col" required>
+                                                    <!-- 动态填充 -->
+                                                </select>
+                                            </div>
+                                        </div>
+                                        <div class="col-md-6">
+                                            <div class="mb-3">
+                                                <label for="timeCol" class="form-label">时间列</label>
+                                                <select class="form-select" id="timeCol" name="time_col" required>
+                                                    <!-- 动态填充 -->
+                                                </select>
+                                            </div>
+                                        </div>
+                                    </div>
+                                    <div class="row">
+                                        <div class="col-md-6">
+                                            <div class="mb-3">
+                                                <label for="capacityCol" class="form-label">容量列</label>
+                                                <select class="form-select" id="capacityCol" name="capacity_col" required>
+                                                    <!-- 动态填充 -->
+                                                </select>
+                                            </div>
+                                        </div>
+                                        <div class="col-md-6">
+                                            <div class="mb-3">
+                                                <label for="targetCol" class="form-label">目标列（SOH）</label>
+                                                <select class="form-select" id="targetCol" name="target_col" required>
+                                                    <!-- 动态填充 -->
+                                                </select>
+                                            </div>
+                                        </div>
+                                    </div>
+                                    <button type="submit" class="btn btn-primary">
+                                        <i class="fas fa-puzzle-piece me-2"></i> 提取特征
+                                    </button>
+                                </form>
+
+                                <div class="loading" id="featureLoading">
+                                    <i class="fas fa-spinner fa-spin"></i>
+                                    <p>正在提取特征，请稍候...</p>
+                                </div>
+
+                                <div id="featureResult" class="result-container" style="display: none;">
+                                    <h5>提取的特征</h5>
+                                    <div class="table-responsive" id="featurePreview"></div>
+                                    <div class="mt-3">
+                                        <p><strong>特征类型：</strong> <span id="featureTypes"></span></p>
+                                        <p><strong>选择的特征：</strong> <span id="selectedFeatures"></span></p>
+                                    </div>
+                                    <div class="row">
+                                        <div class="col-md-6">
+                                            <h5>特征重要性</h5>
+                                            <div class="plot-container">
+                                                <img id="importancePlot" src="" alt="特征重要性图">
+                                            </div>
+                                        </div>
+                                        <div class="col-md-6">
+                                            <h5>特征趋势</h5>
+                                            <div class="plot-container">
+                                                <img id="trendsPlot" src="" alt="特征趋势图">
+                                            </div>
+                                        </div>
+                                    </div>
+                                    <div class="mt-3">
+                                        <a id="downloadFeatures" href="/download_features" class="btn btn-outline-primary">
+                                            <i class="fas fa-download me-2"></i> 下载特征数据
+                                        </a>
+                                    </div>
+                                </div>
+                            </div>
+                            <div class="step-footer">
+                                <button class="btn btn-secondary" id="backToStep3">
+                                    <i class="fas fa-arrow-left me-2"></i> 上一步
+                                </button>
+                                <button class="btn btn-success float-end" id="goToStep5" disabled>
+                                    下一步 <i class="fas fa-arrow-right ms-2"></i>
+                                </button>
+                            </div>
+                        </div>
+                    </div>
+
+                    <!-- 步骤5：模型训练 -->
+                    <div class="tab-pane fade" id="step5">
+                        <div class="step-container">
+                            <div class="step-header">
+                                <h3><i class="fas fa-cogs me-2"></i> 步骤5：模型训练</h3>
+                                <p>训练SOH预测模型</p>
+                            </div>
+                            <div class="step-content">
+                                <form id="modelForm">
+                                    <div class="row">
+                                        <div class="col-md-6">
+                                            <div class="mb-3">
+                                                <label for="modelType" class="form-label">模型类型</label>
+                                                <select class="form-select" id="modelType" name="model_type" required>
+                                                    <option value="svr">支持向量回归 (SVR)</option>
+                                                    <option value="rf">随机森林</option>
+                                                    <option value="gb">梯度提升</option>
+                                                    <option value="xgb">XGBoost</option>
+                                                    <option value="lgb">LightGBM</option>
+                                                    <option value="linear">线性回归</option>
+                                                    <option value="mlp">多层感知机 (MLP)</option>
+                                                </select>
+                                            </div>
+                                        </div>
+                                        <div class="col-md-6">
+                                            <div class="mb-3">
+                                                <label for="testSize" class="form-label">测试集比例</label>
+                                                <input type="range" class="form-range" id="testSize" name="test_size" min="0.1" max="0.5" step="0.05" value="0.2">
+                                                <div class="text-center"><span id="testSizeValue">0.2 (20%)</span></div>
+                                            </div>
+                                        </div>
+                                    </div>
+                                    <button type="submit" class="btn btn-primary">
+                                        <i class="fas fa-cogs me-2"></i> 训练模型
+                                    </button>
+                                </form>
+
+                                <div class="loading" id="modelLoading">
+                                    <i class="fas fa-spinner fa-spin"></i>
+                                    <p>正在训练模型，请稍候...</p>
+                                </div>
+
+                                <div id="modelResult" class="result-container" style="display: none;">
+                                    <h5>模型评估结果</h5>
+                                    <div class="row">
+                                        <div class="col-md-6">
+                                            <table class="table table-bordered">
+                                                <thead>
+                                                    <tr>
+                                                        <th>指标</th>
+                                                        <th>值</th>
+                                                    </tr>
+                                                </thead>
+                                                <tbody>
+                                                    <tr>
+                                                        <td>MSE</td>
+                                                        <td id="modelMSE"></td>
+                                                    </tr>
+                                                    <tr>
+                                                        <td>RMSE</td>
+                                                        <td id="modelRMSE"></td>
+                                                    </tr>
+                                                    <tr>
+                                                        <td>MAE</td>
+                                                        <td id="modelMAE"></td>
+                                                    </tr>
+                                                    <tr>
+                                                        <td>R²</td>
+                                                        <td id="modelR2"></td>
+                                                    </tr>
+                                                </tbody>
+                                            </table>
+                                        </div>
+                                        <div class="col-md-6">
+                                            <div class="plot-container">
+                                                <img id="predictionPlot" src="" alt="预测结果图">
+                                            </div>
+                                        </div>
+                                    </div>
+                                    <div id="importanceContainer" style="display: none;">
+                                        <h5>特征重要性</h5>
+                                        <div class="plot-container">
+                                            <img id="modelImportancePlot" src="" alt="模型特征重要性图">
+                                        </div>
+                                    </div>
+                                    <div class="mt-3">
+                                        <a id="downloadModel" href="#" class="btn btn-outline-primary">
+                                            <i class="fas fa-download me-2"></i> 下载模型
+                                        </a>
+                                    </div>
+                                </div>
+                            </div>
+                            <div class="step-footer">
+                                <button class="btn btn-secondary" id="backToStep4">
+                                    <i class="fas fa-arrow-left me-2"></i> 上一步
+                                </button>
+                                <button class="btn btn-success float-end" id="goToStep6" disabled>
+                                    下一步 <i class="fas fa-arrow-right ms-2"></i>
+                                </button>
+                            </div>
+                        </div>
+                    </div>
+
+                    <!-- 步骤6：预测与评估 -->
+                    <div class="tab-pane fade" id="step6">
+                        <div class="step-container">
+                            <div class="step-header">
+                                <h3><i class="fas fa-chart-line me-2"></i> 步骤6：预测与评估</h3>
+                                <p>预测SOH和RUL</p>
+                            </div>
+                            <div class="step-content">
+                                <form id="predictForm">
+                                    <div class="row">
+                                        <div class="col-md-4">
+                                            <div class="mb-3">
+                                                <label for="predictCycle" class="form-label">循环次数</label>
+                                                <input type="number" class="form-control" id="predictCycle" name="cycle" required>
+                                            </div>
+                                        </div>
+                                        <div class="col-md-4">
+                                            <div class="mb-3">
+                                                <label for="eolThreshold" class="form-label">EOL阈值</label>
+                                                <input type="number" class="form-control" id="eolThreshold" name="eol_threshold" value="0.8" step="0.01" min="0" max="1" required>
+                                            </div>
+                                        </div>
+                                        <div class="col-md-4">
+                                            <div class="mb-3">
+                                                <label for="currentSOH" class="form-label">当前SOH（可选）</label>
+                                                <input type="number" class="form-control" id="currentSOH" name="current_soh" value="0.9" step="0.01" min="0" max="1">
+                                            </div>
+                                        </div>
+                                    </div>
+                                    <button type="submit" class="btn btn-primary">
+                                        <i class="fas fa-chart-line me-2"></i> 预测
+                                    </button>
+                                </form>
+
+                                <div class="loading" id="predictLoading">
+                                    <i class="fas fa-spinner fa-spin"></i>
+                                    <p>正在预测，请稍候...</p>
+                                </div>
+
+                                <div id="predictResult" class="result-container" style="display: none;">
+                                    <div class="row">
+                                        <div class="col-md-6">
+                                            <h5>预测结果</h5>
+                                            <table class="table table-bordered">
+                                                <tbody>
+                                                    <tr>
+                                                        <th>预测SOH</th>
+                                                        <td id="predictedSOH"></td>
+                                                    </tr>
+                                                    <tr>
+                                                        <th>预测RUL（循环）</th>
+                                                        <td id="predictedRUL"></td>
+                                                    </tr>
+                                                </tbody>
+                                            </table>
+                                        </div>
+                                        <div class="col-md-6">
+                                            <div class="plot-container">
+                                                <img id="rulPlot" src="" alt="RUL预测图">
+                                            </div>
+                                        </div>
+                                    </div>
+                                    <div class="mt-4">
+                                        <h5>SOH随循环次数的变化</h5>
+                                        <div class="plot-container">
+                                            <img id="sohPlot" src="" alt="SOH变化图">
+                                        </div>
+                                    </div>
+                                </div>
+                            </div>
+                            <div class="step-footer">
+                                <button class="btn btn-secondary" id="backToStep5">
+                                    <i class="fas fa-arrow-left me-2"></i> 上一步
+                                </button>
+                                <button class="btn btn-success float-end" id="goToStep7">
+                                    下一步 <i class="fas fa-arrow-right ms-2"></i>
+                                </button>
+                            </div>
+                        </div>
+                    </div>
+
+                    <!-- 步骤7：模型优化 -->
+                    <div class="tab-pane fade" id="step7">
+                        <div class="step-container">
+                            <div class="step-header">
+                                <h3><i class="fas fa-sliders-h me-2"></i> 步骤7：模型优化</h3>
+                                <p>优化模型性能</p>
+                            </div>
+                            <div class="step-content">
+                                <ul class="nav nav-tabs" id="optimizeTabs">
+                                    <li class="nav-item">
+                                        <a class="nav-link active" data-bs-toggle="tab" href="#hyperparamTab">超参数优化</a>
+                                    </li>
+                                    <li class="nav-item">
+                                        <a class="nav-link" data-bs-toggle="tab" href="#ensembleTab">集成模型</a>
+                                    </li>
+                                    <li class="nav-item">
+                                        <a class="nav-link" data-bs-toggle="tab" href="#rulEvalTab">RUL评估</a>
+                                    </li>
+                                </ul>
+                                <div class="tab-content">
+                                    <!-- 超参数优化 -->
+                                    <div class="tab-pane fade show active" id="hyperparamTab">
+                                        <div class="mt-3">
+                                            <form id="optimizeForm">
+                                                <div class="mb-3">
+                                                    <label for="optimizeModelType" class="form-label">模型类型</label>
+                                                    <select class="form-select" id="optimizeModelType" name="model_type" required>
+                                                        <option value="svr">支持向量回归 (SVR)</option>
+                                                        <option value="rf">随机森林</option>
+                                                        <option value="gb">梯度提升</option>
+                                                        <option value="xgb">XGBoost</option>
+                                                        <option value="lgb">LightGBM</option>
+                                                        <option value="linear">线性回归</option>
+                                                    </select>
+                                                </div>
+                                                <button type="submit" class="btn btn-primary">
+                                                    <i class="fas fa-sliders-h me-2"></i> 优化模型
+                                                </button>
+                                            </form>
+
+                                            <div class="loading" id="optimizeLoading">
+                                                <i class="fas fa-spinner fa-spin"></i>
+                                                <p>正在优化模型，请稍候...</p>
+                                            </div>
+
+                                            <div id="optimizeResult" class="result-container" style="display: none;">
+                                                <h5>最佳参数</h5>
+                                                <pre id="bestParams" class="bg-light p-3 rounded"></pre>
+                                                
+                                                <h5>交叉验证结果</h5>
+                                                <div class="row">
+                                                    <div class="col-md-6">
+                                                        <table class="table table-bordered">
+                                                            <thead>
+                                                                <tr>
+                                                                    <th>指标</th>
+                                                                    <th>值</th>
+                                                                </tr>
+                                                            </thead>
+                                                            <tbody>
+                                                                <tr>
+                                                                    <td>MSE</td>
+                                                                    <td id="cvMSE"></td>
+                                                                </tr>
+                                                                <tr>
+                                                                    <td>RMSE</td>
+                                                                    <td id="cvRMSE"></td>
+                                                                </tr>
+                                                                <tr>
+                                                                    <td>MAE</td>
+                                                                    <td id="cvMAE"></td>
+                                                                </tr>
+                                                                <tr>
+                                                                    <td>R²</td>
+                                                                    <td id="cvR2"></td>
+                                                                </tr>
+                                                            </tbody>
+                                                        </table>
+                                                    </div>
+                                                    <div class="col-md-6">
+                                                        <div class="plot-container">
+                                                            <img id="cvPlot" src="" alt="交叉验证图">
+                                                        </div>
+                                                    </div>
+                                                </div>
+                                                
+                                                <h5>学习曲线</h5>
+                                                <div class="plot-container">
+                                                    <img id="learningCurvePlot" src="" alt="学习曲线图">
+                                                </div>
+                                                
+                                                <div class="mt-3">
+                                                    <a id="downloadOptimizedModel" href="#" class="btn btn-outline-primary">
+                                                        <i class="fas fa-download me-2"></i> 下载优化后的模型
+                                                    </a>
+                                                </div>
+                                            </div>
+                                        </div>
+                                    </div>
+                                    
+                                    <!-- 集成模型 -->
+                                    <div class="tab-pane fade" id="ensembleTab">
+                                        <div class="mt-3">
+                                            <form id="ensembleForm">
+                                                <div class="mb-3">
+                                                    <label class="form-label">选择模型</label>
+                                                    <div class="row">
+                                                        <div class="col-md-4">
+                                                            <div class="form-check">
+                                                                <input class="form-check-input" type="checkbox" name="model_types[]" value="svr" id="svrCheck" checked>
+                                                                <label class="form-check-label" for="svrCheck">
+                                                                    SVR
+                                                                </label>
+                                                            </div>
+                                                        </div>
+                                                        <div class="col-md-4">
+                                                            <div class="form-check">
+                                                                <input class="form-check-input" type="checkbox" name="model_types[]" value="rf" id="rfCheck" checked>
+                                                                <label class="form-check-label" for="rfCheck">
+                                                                    随机森林
+                                                                </label>
+                                                            </div>
+                                                        </div>
+                                                        <div class="col-md-4">
+                                                            <div class="form-check">
+                                                                <input class="form-check-input" type="checkbox" name="model_types[]" value="xgb" id="xgbCheck" checked>
+                                                                <label class="form-check-label" for="xgbCheck">
+                                                                    XGBoost
+                                                                </label>
+                                                            </div>
+                                                        </div>
+                                                    </div>
+                                                </div>
+                                                
+                                                <div class="mb-3">
+                                                    <label class="form-label">模型权重</label>
+                                                    <div class="row">
+                                                        <div class="col-md-4">
+                                                            <div class="input-group mb-3">
+                                                                <span class="input-group-text">SVR</span>
+                                                                <input type="number" class="form-control" name="weights[]" value="0.4" step="0.1" min="0" max="1">
+                                                            </div>
+                                                        </div>
+                                                        <div class="col-md-4">
+                                                            <div class="input-group mb-3">
+                                                                <span class="input-group-text">随机森林</span>
+                                                                <input type="number" class="form-control" name="weights[]" value="0.3" step="0.1" min="0" max="1">
+                                                            </div>
+                                                        </div>
+                                                        <div class="col-md-4">
+                                                            <div class="input-group mb-3">
+                                                                <span class="input-group-text">XGBoost</span>
+                                                                <input type="number" class="form-control" name="weights[]" value="0.3" step="0.1" min="0" max="1">
+                                                            </div>
+                                                        </div>
+                                                    </div>
+                                                </div>
+                                                
+                                                <button type="submit" class="btn btn-primary">
+                                                    <i class="fas fa-object-group me-2"></i> 评估集成模型
+                                                </button>
+                                            </form>
+
+                                            <div class="loading" id="ensembleLoading">
+                                                <i class="fas fa-spinner fa-spin"></i>
+                                                <p>正在评估集成模型，请稍候...</p>
+                                            </div>
+
+                                            <div id="ensembleResult" class="result-container" style="display: none;">
+                                                <div class="row">
+                                                    <div class="col-md-6">
+                                                        <h5>集成模型评估结果</h5>
+                                                        <table class="table table-bordered">
+                                                            <thead>
+                                                                <tr>
+                                                                    <th>指标</th>
+                                                                    <th>值</th>
+                                                                </tr>
+                                                            </thead>
+                                                            <tbody>
+                                                                <tr>
+                                                                    <td>MSE</td>
+                                                                    <td id="ensembleMSE"></td>
+                                                                </tr>
+                                                                <tr>
+                                                                    <td>RMSE</td>
+                                                                    <td id="ensembleRMSE"></td>
+                                                                </tr>
+                                                                <tr>
+                                                                    <td>MAE</td>
+                                                                    <td id="ensembleMAE"></td>
+                                                                </tr>
+                                                                <tr>
+                                                                    <td>R²</td>
+                                                                    <td id="ensembleR2"></td>
+                                                                </tr>
+                                                            </tbody>
+                                                        </table>
+                                                    </div>
+                                                    <div class="col-md-6">
+                                                        <div class="plot-container">
+                                                            <img id="ensemblePlot" src="" alt="集成模型预测图">
+                                                        </div>
+                                                    </div>
+                                                </div>
+                                            </div>
+                                        </div>
+                                    </div>
+                                    
+                                    <!-- RUL评估 -->
+                                    <div class="tab-pane fade" id="rulEvalTab">
+                                        <div class="mt-3">
+                                            <form id="rulEvalForm">
+                                                <div class="row">
+                                                    <div class="col-md-6">
+                                                        <div class="mb-3">
+                                                            <label for="rulModelType" class="form-label">模型类型</label>
+                                                            <select class="form-select" id="rulModelType" name="model_type" required>
+                                                                <option value="svr">支持向量回归 (SVR)</option>
+                                                                <option value="rf">随机森林</option>
+                                                                <option value="gb">梯度提升</option>
+                                                                <option value="xgb">XGBoost</option>
+                                                                <option value="lgb">LightGBM</option>
+                                                                <option value="linear">线性回归</option>
+                                                            </select>
+                                                        </div>
+                                                    </div>
+                                                    <div class="col-md-6">
+                                                        <div class="mb-3">
+                                                            <label for="rulEolThreshold" class="form-label">EOL阈值</label>
+                                                            <input type="number" class="form-control" id="rulEolThreshold" name="eol_threshold" value="0.8" step="0.01" min="0" max="1" required>
+                                                        </div>
+                                                    </div>
+                                                </div>
+                                                <button type="submit" class="btn btn-primary">
+                                                    <i class="fas fa-chart-line me-2"></i> 评估RUL预测
+                                                </button>
+                                            </form>
+
+                                            <div class="loading" id="rulEvalLoading">
+                                                <i class="fas fa-spinner fa-spin"></i>
+                                                <p>正在评估RUL预测，请稍候...</p>
+                                            </div>
+
+                                            <div id="rulEvalResult" class="result-container" style="display: none;">
+                                                <div class="row">
+                                                    <div class="col-md-6">
+                                                        <h5>RUL预测评估结果</h5>
+                                                        <table class="table table-bordered">
+                                                            <thead>
+                                                                <tr>
+                                                                    <th>指标</th>
+                                                                    <th>值</th>
+                                                                </tr>
+                                                            </thead>
+                                                            <tbody>
+                                                                <tr>
+                                                                    <td>MSE</td>
+                                                                    <td id="rulMSE"></td>
+                                                                </tr>
+                                                                <tr>
+                                                                    <td>RMSE</td>
+                                                                    <td id="rulRMSE"></td>
+                                                                </tr>
+                                                                <tr>
+                                                                    <td>MAE</td>
+                                                                    <td id="rulMAE"></td>
+                                                                </tr>
+                                                            </tbody>
+                                                        </table>
+                                                    </div>
+                                                    <div class="col-md-6">
+                                                        <div class="plot-container">
+                                                            <img id="rulEvalPlot" src="" alt="RUL预测评估图">
+                                                        </div>
+                                                    </div>
+                                                </div>
+                                                <div class="mt-4">
+                                                    <h5>RUL随循环次数的变化</h5>
+                                                    <div class="plot-container">
+                                                        <img id="rulVsCyclePlot" src="" alt="RUL随循环次数的变化图">
+                                                    </div>
+                                                </div>
+                                            </div>
+                                        </div>
+                                    </div>
+                                </div>
+                            </div>
+                            <div class="step-footer">
+                                <button class="btn btn-secondary" id="backToStep6">
+                                    <i class="fas fa-arrow-left me-2"></i> 上一步
+                                </button>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <footer class="mt-5 pt-3 text-muted border-top">
+            <div class="row">
+                <div class="col-md-6">
+                    <p>&copy; 2025 电池寿命预测系统</p>
+                </div>
+                <div class="col-md-6 text-end">
+                    <p>基于机器学习的电池SOH和RUL预测平台</p>
+                </div>
+            </div>
+        </footer>
+    </div>
+
+    <!-- Bootstrap JS -->
+    <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.1.3/dist/js/bootstrap.bundle.min.js"></script>
+    <!-- jQuery -->
+    <script src="https://code.jquery.com/jquery-3.6.0.min.js"></script>
+    <!-- 自定义JS -->
+    <script>
+        $(document).ready(function() {
+            // 步骤导航
+            $('.list-group-item').on('click', function(e) {
+                e.preventDefault();
+                $(this).tab('show');
+            });
+
+            // 测试集比例滑块
+            $('#testSize').on('input', function() {
+                const value = $(this).val();
+                $('#testSizeValue').text(`${value} (${value * 100}%)`);
+            });
+
+            // 步骤导航按钮
+            $('#goToStep2').on('click', function() {
+                $('.list-group-item[href="#step2"]').tab('show');
+            });
+            $('#backToStep1').on('click', function() {
+                $('.list-group-item[href="#step1"]').tab('show');
+            });
+            $('#goToStep3').on('click', function() {
+                $('.list-group-item[href="#step3"]').tab('show');
+            });
+            $('#backToStep2').on('click', function() {
+                $('.list-group-item[href="#step2"]').tab('show');
+            });
+            $('#goToStep4').on('click', function() {
+                $('.list-group-item[href="#step4"]').tab('show');
+            });
+            $('#backToStep3').on('click', function() {
+                $('.list-group-item[href="#step3"]').tab('show');
+            });
+            $('#goToStep5').on('click', function() {
+                $('.list-group-item[href="#step5"]').tab('show');
+            });
+            $('#backToStep4').on('click', function() {
+                $('.list-group-item[href="#step4"]').tab('show');
+            });
+            $('#goToStep6').on('click', function() {
+                $('.list-group-item[href="#step6"]').tab('show');
+            });
+            $('#backToStep5').on('click', function() {
+                $('.list-group-item[href="#step5"]').tab('show');
+            });
+            $('#goToStep7').on('click', function() {
+                $('.list-group-item[href="#step7"]').tab('show');
+            });
+            $('#backToStep6').on('click', function() {
+                $('.list-group-item[href="#step6"]').tab('show');
+            });
+
+            // 文件上传
+            $('#uploadForm').on('submit', function(e) {
+                e.preventDefault();
+                const formData = new FormData(this);
+                
+                $('#uploadLoading').show();
+                
+                $.ajax({
+                    url: '/upload',
+                    type: 'POST',
+                    data: formData,
+                    contentType: false,
+                    processData: false,
+                    success: function(response) {
+                        $('#uploadLoading').hide();
+                        
+                        if (response.error) {
+                            alert('错误: ' + response.error);
+                            return;
+                        }
+                        
+                        $('#dataPreview').html(response.preview);
+                        $('#rowCount').text(response.rows);
+                        $('#columnList').text(response.columns.join(', '));
+                        $('#uploadResult').show();
+                        $('#goToStep2').prop('disabled', false);
+                        
+                        // 填充列选择下拉框
+                        const columns = response.columns;
+                        $('#cycleCol, #voltageCol, #currentCol, #timeCol, #capacityCol, #targetCol').empty();
+                        
+                        columns.forEach(function(column) {
+                            $('#cycleCol').append(`<option value="${column}">${column}</option>`);
+                            $('#voltageCol').append(`<option value="${column}">${column}</option>`);
+                            $('#currentCol').append(`<option value="${column}">${column}</option>`);
+                            $('#timeCol').append(`<option value="${column}">${column}</option>`);
+                            $('#capacityCol').append(`<option value="${column}">${column}</option>`);
+                            $('#targetCol').append(`<option value="${column}">${column}</option>`);
+                        });
+                        
+                        // 尝试自动选择常见列名
+                        columns.forEach(function(column) {
+                            const lowerCol = column.toLowerCase();
+                            if (lowerCol.includes('cycle')) {
+                                $('#cycleCol').val(column);
+                            } else if (lowerCol.includes('volt')) {
+                                $('#voltageCol').val(column);
+                            } else if (lowerCol.includes('curr')) {
+                                $('#currentCol').val(column);
+                            } else if (lowerCol.includes('time')) {
+                                $('#timeCol').val(column);
+                            } else if (lowerCol.includes('capa')) {
+                                $('#capacityCol').val(column);
+                            } else if (lowerCol.includes('soh')) {
+                                $('#targetCol').val(column);
+                            }
+                        });
+                    },
+                    error: function() {
+                        $('#uploadLoading').hide();
+                        alert('上传文件时出错');
+                    }
+                });
+            });
+
+            // 数据预处理
+            $('#preprocessForm').on('submit', function(e) {
+                e.preventDefault();
+                const formData = new FormData(this);
+                
+                // 添加复选框值
+                formData.append('drop_na', $('#dropNa').is(':checked'));
+                formData.append('drop_duplicates', $('#dropDuplicates').is(':checked'));
+                
+                $('#preprocessLoading').show();
+                
+                $.ajax({
+                    url: '/preprocess',
+                    type: 'POST',
+                    data: formData,
+                    contentType: false,
+                    processData: false,
+                    success: function(response) {
+                        $('#preprocessLoading').hide();
+                        
+                        if (response.error) {
+                            alert('错误: ' + response.error);
+                            return;
+                        }
+                        
+                        $('#preprocessedDataPreview').html(response.preview);
+                        $('#preprocessedRowCount').text(response.rows);
+                        $('#preprocessResult').show();
+                        $('#goToStep3').prop('disabled', false);
+                    },
+                    error: function() {
+                        $('#preprocessLoading').hide();
+                        alert('预处理数据时出错');
+                    }
+                });
+            });
+
+            // 探索性数据分析
+            $('#analyzeBtn').on('click', function() {
+                $('#analyzeLoading').show();
+                
+                $.ajax({
+                    url: '/analyze',
+                    type: 'POST',
+                    success: function(response) {
+                        $('#analyzeLoading').hide();
+                        
+                        if (response.error) {
+                            alert('错误: ' + response.error);
+                            return;
+                        }
+                        
+                        $('#summaryTable').html(response.summary);
+                        $('#distPlot').attr('src', 'data:image/png;base64,' + response.dist_plot);
+                        $('#corrPlot').attr('src', 'data:image/png;base64,' + response.corr_plot);
+                        
+                        if (response.capacity_plot) {
+                            $('#capacityPlot').attr('src', 'data:image/png;base64,' + response.capacity_plot);
+                            $('#capacityTabItem').show();
+                        } else {
+                            $('#capacityTabItem').hide();
+                        }
+                        
+                        $('#analyzeResult').show();
+                        $('#goToStep4').prop('disabled', false);
+                    },
+                    error: function() {
+                        $('#analyzeLoading').hide();
+                        alert('分析数据时出错');
+                    }
+                });
+            });
+
+            // 特征提取
+            $('#featureForm').on('submit', function(e) {
+                e.preventDefault();
+                const formData = new FormData(this);
+                
+                $('#featureLoading').show();
+                
+                $.ajax({
+                    url: '/extract_features',
+                    type: 'POST',
+                    data: formData,
+                    contentType: false,
+                    processData: false,
+                    success: function(response) {
+                        $('#featureLoading').hide();
+                        
+                        if (response.error) {
+                            alert('错误: ' + response.error);
+                            return;
+                        }
+                        
+                        $('#featurePreview').html(response.preview);
+                        $('#featureTypes').text(response.feature_names.join(', '));
+                        $('#selectedFeatures').text(response.feature_cols.join(', '));
+                        $('#importancePlot').attr('src', 'data:image/png;base64,' + response.importance_plot);
+                        $('#trendsPlot').attr('src', 'data:image/png;base64,' + response.trends_plot);
+                        
+                        $('#featureResult').show();
+                        $('#goToStep5').prop('disabled', false);
+                    },
+                    error: function() {
+                        $('#featureLoading').hide();
+                        alert('提取特征时出错');
+                    }
+                });
+            });
+
+            // 模型训练
+            $('#modelForm').on('submit', function(e) {
+                e.preventDefault();
+                const formData = new FormData(this);
+                
+                $('#modelLoading').show();
+                
+                $.ajax({
+                    url: '/train_model',
+                    type: 'POST',
+                    data: formData,
+                    contentType: false,
+                    processData: false,
+                    success: function(response) {
+                        $('#modelLoading').hide();
+                        
+                        if (response.error) {
+                            alert('错误: ' + response.error);
+                            return;
+                        }
+                        
+                        $('#modelMSE').text(response.metrics.mse.toFixed(6));
+                        $('#modelRMSE').text(response.metrics.rmse.toFixed(6));
+                        $('#modelMAE').text(response.metrics.mae.toFixed(6));
+                        $('#modelR2').text(response.metrics.r2.toFixed(6));
+                        $('#predictionPlot').attr('src', 'data:image/png;base64,' + response.prediction_plot);
+                        
+                        if (response.importance_plot) {
+                            $('#modelImportancePlot').attr('src', 'data:image/png;base64,' + response.importance_plot);
+                            $('#importanceContainer').show();
+                        } else {
+                            $('#importanceContainer').hide();
+                        }
+                        
+                        // 更新下载链接
+                        $('#downloadModel').attr('href', '/download_model?model_type=' + formData.get('model_type'));
+                        
+                        $('#modelResult').show();
+                        $('#goToStep6').prop('disabled', false);
+                    },
+                    error: function() {
+                        $('#modelLoading').hide();
+                        alert('训练模型时出错');
+                    }
+                });
+            });
+
+            // 预测
+            $('#predictForm').on('submit', function(e) {
+                e.preventDefault();
+                const formData = new FormData(this);
+                
+                $('#predictLoading').show();
+                
+                $.ajax({
+                    url: '/predict',
+                    type: 'POST',
+                    data: formData,
+                    contentType: false,
+                    processData: false,
+                    success: function(response) {
+                        $('#predictLoading').hide();
+                        
+                        if (response.error) {
+                            alert('错误: ' + response.error);
+                            return;
+                        }
+                        
+                        $('#predictedSOH').text(response.soh_pred.toFixed(4));
+                        $('#predictedRUL').text(response.rul_pred);
+                        $('#rulPlot').attr('src', 'data:image/png;base64,' + response.rul_plot);
+                        $('#sohPlot').attr('src', 'data:image/png;base64,' + response.soh_plot);
+                        
+                        $('#predictResult').show();
+                    },
+                    error: function() {
+                        $('#predictLoading').hide();
+                        alert('预测时出错');
+                    }
+                });
+            });
+
+            // 超参数优化
+            $('#optimizeForm').on('submit', function(e) {
+                e.preventDefault();
+                const formData = new FormData(this);
+                
+                $('#optimizeLoading').show();
+                
+                $.ajax({
+                    url: '/optimize_model',
+                    type: 'POST',
+                    data: formData,
+                    contentType: false,
+                    processData: false,
+                    success: function(response) {
+                        $('#optimizeLoading').hide();
+                        
+                        if (response.error) {
+                            alert('错误: ' + response.error);
+                            return;
+                        }
+                        
+                        $('#bestParams').text(JSON.stringify(response.best_params, null, 2));
+                        $('#cvMSE').text(response.cv_scores.mse.toFixed(6));
+                        $('#cvRMSE').text(response.cv_scores.rmse.toFixed(6));
+                        $('#cvMAE').text(response.cv_scores.mae.toFixed(6));
+                        $('#cvR2').text(response.cv_scores.r2.toFixed(6));
+                        $('#cvPlot').attr('src', 'data:image/png;base64,' + response.cv_plot);
+                        $('#learningCurvePlot').attr('src', 'data:image/png;base64,' + response.learning_curve_plot);
+                        
+                        // 更新下载链接
+                        $('#downloadOptimizedModel').attr('href', '/download_model?model_type=' + formData.get('model_type') + '&optimized=true');
+                        
+                        $('#optimizeResult').show();
+                    },
+                    error: function() {
+                        $('#optimizeLoading').hide();
+                        alert('优化模型时出错');
+                    }
+                });
+            });
+
+            // 集成模型
+            $('#ensembleForm').on('submit', function(e) {
+                e.preventDefault();
+                const formData = new FormData(this);
+                
+                $('#ensembleLoading').show();
+                
+                $.ajax({
+                    url: '/ensemble_model',
+                    type: 'POST',
+                    data: formData,
+                    contentType: false,
+                    processData: false,
+                    success: function(response) {
+                        $('#ensembleLoading').hide();
+                        
+                        if (response.error) {
+                            alert('错误: ' + response.error);
+                            return;
+                        }
+                        
+                        $('#ensembleMSE').text(response.metrics.mse.toFixed(6));
+                        $('#ensembleRMSE').text(response.metrics.rmse.toFixed(6));
+                        $('#ensembleMAE').text(response.metrics.mae.toFixed(6));
+                        $('#ensembleR2').text(response.metrics.r2.toFixed(6));
+                        $('#ensemblePlot').attr('src', 'data:image/png;base64,' + response.ensemble_plot);
+                        
+                        $('#ensembleResult').show();
+                    },
+                    error: function() {
+                        $('#ensembleLoading').hide();
+                        alert('评估集成模型时出错');
+                    }
+                });
+            });
+
+            // RUL评估
+            $('#rulEvalForm').on('submit', function(e) {
+                e.preventDefault();
+                const formData = new FormData(this);
+                
+                $('#rulEvalLoading').show();
+                
+                $.ajax({
+                    url: '/evaluate_rul',
+                    type: 'POST',
+                    data: formData,
+                    contentType: false,
+                    processData: false,
+                    success: function(response) {
+                        $('#rulEvalLoading').hide();
+                        
+                        if (response.error) {
+                            alert('错误: ' + response.error);
+                            return;
+                        }
+                        
+                        $('#rulMSE').text(response.metrics.mse.toFixed(6));
+                        $('#rulRMSE').text(response.metrics.rmse.toFixed(6));
+                        $('#rulMAE').text(response.metrics.mae.toFixed(6));
+                        $('#rulEvalPlot').attr('src', 'data:image/png;base64,' + response.rul_plot);
+                        $('#rulVsCyclePlot').attr('src', 'data:image/png;base64,' + response.rul_vs_cycle_plot);
+                        
+                        $('#rulEvalResult').show();
+                    },
+                    error: function() {
+                        $('#rulEvalLoading').hide();
+                        alert('评估RUL预测时出错');
+                    }
+                });
+            });
+        });
+    </script>
+</body>
+</html>
