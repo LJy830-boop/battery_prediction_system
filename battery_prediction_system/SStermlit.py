@@ -900,4 +900,4 @@ elif st.session_state.current_step == 7:
 # 页脚
 st.markdown("---")
 st.markdown("### 电池寿命预测系统 | 基于机器学习的SOH和RUL预测")
-st.markdown("© 2025 电池健康管理团队")
+st.markdown("© 2025 浙江锋锂新能源科技有限公司-唐光盛团队")
