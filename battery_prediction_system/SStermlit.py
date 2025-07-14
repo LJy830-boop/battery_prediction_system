@@ -1,854 +1,904 @@
-import streamlit as st
-import pandas as pd
-import numpy as np
-import matplotlib.pyplot as plt
-import base64
-from io import BytesIO
+# coding: utf-8
+"""
+电池寿命预测模型 - Streamlit应用
+该脚本实现了电池寿命预测模型的Streamlit界面，允许用户上传数据、训练模型并可视化预测结果。
+"""
+
 import os
-import tempfile
-from pathlib import Path
+import io
+import base64
+import numpy as np
+import pandas as pd
+import matplotlib.pyplot as plt
+import seaborn as sns
+import streamlit as st
+import joblib
+import warnings
+warnings.filterwarnings('ignore')
 
-# 导入服务器连接模块
-from server_connection import ServerConnectionManager, GitHubDataManager
+# 导入自定义模块
+from data_preprocessing_pipeline import BatteryDataPreprocessor
+from exploratory_data_analysis import BatteryDataExplorer
+from feature_extraction import BatteryFeatureExtractor
+from prediction_models import BatteryPredictionModel
+from model_evaluation import ModelEvaluator
 
-# 设置支持中文的字体
-plt.rcParams['font.sans-serif'] = ['SimHei']
-# 避免负号显示异常
-plt.rcParams['axes.unicode_minus'] = False
-
-# 设置页面配置
-st.set_page_config(page_title="电池SOH和RUL预测系统", layout="wide")
-
-# 使用markdown避免字符显示问题
-st.markdown("# 电池健康状态(SOH)和剩余使用寿命(RUL)预测系统 ")
-
-# 初始化连接管理器
-if 'connection_manager' not in st.session_state:
-    st.session_state.connection_manager = ServerConnectionManager()
-
-if 'github_manager' not in st.session_state:
-    st.session_state.github_manager = GitHubDataManager(st.session_state.connection_manager)
-
-# 侧边栏 - 数据源选择和服务器连接
-st.sidebar.markdown("### 数据源选择")
-
-data_source = st.sidebar.radio(
-    "选择数据来源:",
-    ["本地文件上传", "服务器连接", "GitHub仓库"],
-    help="选择获取电池测试数据的方式"
+# 配置页面
+st.set_page_config(
+page_title="电池寿命预测系统",
+page_icon="🔋",
+layout="wide",
+initial_sidebar_state="expanded"
 )
 
-# 服务器连接配置
-if data_source in ["服务器连接", "GitHub仓库"]:
-    st.sidebar.markdown("### 服务器连接配置")
-    
-    # 连接状态显示
-    connection_status = st.session_state.connection_manager.get_connection_status()
-    
-    if connection_status['status'] == 'connected':
-        st.sidebar.success("✅ 服务器已连接")
-        if st.sidebar.button("断开连接"):
-            st.session_state.connection_manager.disconnect()
-            st.rerun()
-    elif connection_status['status'] == 'error':
-        st.sidebar.error(f"❌ 连接错误: {connection_status['last_error']}")
-    else:
-        st.sidebar.info("🔌 未连接")
-    
-    # 连接配置表单
-    with st.sidebar.expander("服务器连接设置", expanded=connection_status['status'] != 'connected'):
-        with st.form("server_connection_form"):
-            st.markdown("#### SSH连接配置")
-            
-            # 加载保存的配置
-            saved_config = st.session_state.connection_manager.load_connection_config()
-            
-            host = st.text_input("服务器地址", value=saved_config.get('host', ''), 
-                               placeholder="例如: 192.168.1.100 或 example.com")
-            port = st.number_input("端口", min_value=1, max_value=65535, 
-                                 value=saved_config.get('port', 22))
-            username = st.text_input("用户名", value=saved_config.get('username', ''),
-                                   placeholder="Linux用户名")
-            
-            # 认证方式选择
-            auth_method = st.radio("认证方式", ["密码认证", "私钥认证"])
-            
-            password = ""
-            private_key_path = ""
-            private_key_content = ""
-            
-            if auth_method == "密码认证":
-                password = st.text_input("密码", type="password", 
-                                       help="服务器登录密码")
-            else:
-                key_input_method = st.radio("私钥输入方式", ["文件路径", "直接输入"])
-                
-                if key_input_method == "文件路径":
-                    private_key_path = st.text_input("私钥文件路径", 
-                                                   placeholder="例如: ~/.ssh/id_rsa")
-                else:
-                    private_key_content = st.text_area("私钥内容", 
-                                                     placeholder="粘贴私钥内容...",
-                                                     height=100)
-            
-            # 保存配置选项
-            save_config = st.checkbox("保存连接配置", value=True,
-                                    help="将连接配置保存到当前会话（加密存储）")
-            
-            col1, col2 = st.columns(2)
-            
-            with col1:
-                test_connection = st.form_submit_button("测试连接", type="secondary")
-            
-            with col2:
-                connect_button = st.form_submit_button("连接", type="primary")
-            
-            # 处理测试连接
-            if test_connection:
-                if host and username:
-                    with st.spinner("测试连接中..."):
-                        success, message = st.session_state.connection_manager.test_ssh_connection(
-                            host, port, username, password, private_key_path, private_key_content
-                        )
-                    
-                    if success:
-                        st.success(message)
-                    else:
-                        st.error(message)
-                else:
-                    st.error("请填写服务器地址和用户名")
-            
-            # 处理连接
-            if connect_button:
-                if host and username:
-                    with st.spinner("建立连接中..."):
-                        success = st.session_state.connection_manager.connect_ssh(
-                            host, port, username, password, private_key_path, private_key_content
-                        )
-                    
-                    if success:
-                        st.success("连接成功！")
-                        
-                        # 保存配置
-                        if save_config:
-                            config = {
-                                'host': host,
-                                'port': port,
-                                'username': username,
-                                'password': password,
-                                'private_key_path': private_key_path,
-                                'private_key_content': private_key_content
-                            }
-                            st.session_state.connection_manager.save_connection_config(config)
-                        
-                        st.rerun()
-                    else:
-                        error_msg = st.session_state.connection_manager.last_error
-                        st.error(f"连接失败: {error_msg}")
-                else:
-                    st.error("请填写服务器地址和用户名")
+# 配置上传文件存储路径
+UPLOAD_FOLDER = 'uploads'
+OUTPUT_FOLDER = 'output'
+MODELS_FOLDER = 'models'
+ALLOWED_EXTENSIONS = {'csv', 'xlsx', 'xls'}
 
-# GitHub仓库配置
-if data_source == "GitHub仓库":
-    st.sidebar.markdown("### GitHub仓库配置")
-    
-    with st.sidebar.expander("GitHub设置", expanded=True):
-        with st.form("github_config_form"):
-            repo_url = st.text_input("仓库URL", 
-                                   placeholder="https://github.com/username/repo.git")
-            branch = st.text_input("分支", value="main", 
-                                 placeholder="main 或 master")
-            github_token = st.text_input("访问Token (可选)", type="password",
-                                       help="私有仓库需要提供Personal Access Token")
-            
-            # 服务器同步选项
-            sync_to_server = st.checkbox("同步到服务器", 
-                                       help="将GitHub数据同步到连接的服务器")
-            
-            if sync_to_server:
-                server_path = st.text_input("服务器路径", 
-                                          placeholder="/home/user/battery_data")
-            else:
-                server_path = ""
-            
-            fetch_data_button = st.form_submit_button("获取数据", type="primary")
-            
-            if fetch_data_button:
-                if repo_url:
-                    with st.spinner("从GitHub获取数据中..."):
-                        success, data_files = st.session_state.github_manager.fetch_data_from_github(
-                            repo_url, branch, github_token
-                        )
-                    
-                    if success:
-                        st.success(f"成功获取数据，找到 {len(data_files)} 个数据文件")
-                        
-                        # 如果需要同步到服务器
-                        if sync_to_server and server_path:
-                            if st.session_state.connection_manager.connection_status == 'connected':
-                                with st.spinner("同步到服务器中..."):
-                                    sync_success = st.session_state.github_manager.sync_to_server(server_path)
-                                
-                                if sync_success:
-                                    st.success("数据已同步到服务器")
-                                else:
-                                    st.error(f"同步失败: {st.session_state.connection_manager.last_error}")
-                            else:
-                                st.warning("请先连接到服务器")
-                        
-                        # 保存数据文件列表到会话状态
-                        st.session_state.github_data_files = data_files
-                        
-                    else:
-                        error_msg = st.session_state.connection_manager.last_error
-                        st.error(f"获取数据失败: {error_msg}")
-                else:
-                    st.error("请输入仓库URL")
+# 确保目录存在
+for folder in [UPLOAD_FOLDER, OUTPUT_FOLDER, MODELS_FOLDER]:
+os.makedirs(folder, exist_ok=True)
 
-# 侧边栏说明
-st.sidebar.markdown("### 使用说明")
-st.sidebar.info(
-    """
-    **数据来源选项:**
-    
-    1. **本地文件上传**: 直接上传Excel文件
-    2. **服务器连接**: 从远程Linux服务器获取数据
-    3. **GitHub仓库**: 从GitHub仓库克隆数据
-    
-    **服务器连接支持:**
-    - SSH密码认证
-    - SSH私钥认证
-    - 安全的配置存储
-    - 文件传输功能
-    
-    **GitHub集成功能:**
-    - 公开和私有仓库支持
-    - 自动数据文件识别
-    - 服务器同步功能
-    """
+# 初始化会话状态
+if 'data' not in st.session_state:
+st.session_state.data = None
+if 'features' not in st.session_state:
+st.session_state.features = None
+if 'model' not in st.session_state:
+st.session_state.model = None
+if 'model_name' not in st.session_state:
+st.session_state.model_name = None
+if 'feature_cols' not in st.session_state:
+st.session_state.feature_cols = None
+if 'target_col' not in st.session_state:
+st.session_state.target_col = None
+if 'current_step' not in st.session_state:
+st.session_state.current_step = 1
+
+# 辅助函数
+def allowed_file(filename):
+"""检查文件类型是否允许"""
+return '.' in filename and filename.rsplit('.', 1)[1].lower() in ALLOWED_EXTENSIONS
+
+def get_image_base64(fig):
+"""将matplotlib图形转换为base64编码"""
+buf = io.BytesIO()
+fig.savefig(buf, format='png', bbox_inches='tight')
+buf.seek(0)
+img_str = base64.b64encode(buf.read()).decode()
+return img_str
+
+# 侧边栏导航
+st.sidebar.title("电池寿命预测系统")
+st.sidebar.image("https://img.icons8.com/color/96/000000/battery-level.png", width=100)
+
+step = st.sidebar.radio(
+"导航",
+["1. 数据上传", "2. 数据预处理", "3. 探索性分析", "4. 特征提取", 
+"5. 模型训练", "6. 预测与评估", "7. 模型优化"],
+index=st.session_state.current_step - 1
 )
 
-# 创建预测结果可视化
-def create_prediction_plot(soh_pred, rul_pred):
-    """创建SOH和RUL预测结果的可视化"""
-    fig, (ax1, ax2) = plt.subplots(1, 2, figsize=(12, 5))
+st.session_state.current_step = int(step[0])
 
-    # SOH仪表盘
-    soh_colors = ['#FF0000', '#FFA500', '#FFFF00', '#008000']
-    soh_thresholds = [0, 60, 80, 90, 100]
+# 1. 数据上传页面
+if st.session_state.current_step == 1:
+st.title("1. 数据上传")
+st.write("上传电池数据文件（支持CSV和Excel格式）")
 
-    # 确定SOH所在的区间
-    soh_color = soh_colors[0]
-    for i in range(len(soh_thresholds)-1):
-        if soh_thresholds[i] <= soh_pred <= soh_thresholds[i+1]:
-            soh_color = soh_colors[i]
-            break
+uploaded_file = st.file_uploader("选择数据文件", type=["csv", "xlsx", "xls"])
 
-    ax1.pie([soh_pred, 100-soh_pred], colors=[soh_color, '#EEEEEE'], 
-            startangle=90, counterclock=False, 
-            wedgeprops={'width': 0.3, 'edgecolor': 'w'})
-    ax1.text(0, 0, f"{soh_pred:.1f}%", ha='center', va='center', fontsize=24, fontweight='bold')
-    ax1.set_title('电池健康状态 (SOH)', fontsize=16)
+if uploaded_file is not None:
+try:
+# 保存上传的文件
+file_path = os.path.join(UPLOAD_FOLDER, uploaded_file.name)
+with open(file_path, "wb") as f:
+f.write(uploaded_file.getbuffer())
 
-    # RUL条形图
-    ax2.barh(['剩余使用寿命'], [rul_pred], color='#4CAF50', height=0.5)
-    ax2.set_xlim(0, max(100, rul_pred*1.2))
-    ax2.text(rul_pred+1, 0, f"{rul_pred:.1f} 循环", va='center', fontsize=14)
-    ax2.set_title('剩余使用寿命 (RUL)', fontsize=16)
-    ax2.set_xlabel('循环次数', fontsize=12)
-    ax2.grid(axis='x', linestyle='--', alpha=0.7)
+# 加载数据
+if uploaded_file.name.endswith('.csv'):
+st.session_state.data = pd.read_csv(file_path)
+else:
+st.session_state.data = pd.read_excel(file_path, engine='openpyxl')
 
-    plt.tight_layout()
-    
-    # 将图转换为base64编码
-    buf = BytesIO()
-    plt.savefig(buf, format='png', dpi=300)
-    buf.seek(0)
-    plt.close()
-    
-    return base64.b64encode(buf.read()).decode()
+st.success(f"文件 {uploaded_file.name} 上传成功！")
 
-# 预测函数 - 混合版本（保持SOH低于80%时RUL为0，但加入其他增强功能）
-def predict_battery(df_cycle, use_nonlinear_model=True, expected_total_cycles=500):
-    """预测电池SOH和RUL - 混合版本，保持SOH低于80%时RUL为0，但加入其他增强功能"""
-    try:
-        # 提取最后一个循环的放电容量
-        if '放电容量(Ah)' in df_cycle.columns:
-            discharge_capacity = df_cycle['放电容量(Ah)'].iloc[-1]
-        else:
-            # 尝试找到可能的放电容量列
-            possible_columns = [col for col in df_cycle.columns if '放电' in col and ('容量' in col or 'capacity' in col.lower())]
-            if possible_columns:
-                discharge_capacity = df_cycle[possible_columns[0]].iloc[-1]
-            else:
-                # 如果找不到放电容量列，使用第一个数值列
-                numeric_cols = df_cycle.select_dtypes(include=[np.number]).columns
-                if len(numeric_cols) > 0:
-                    discharge_capacity = df_cycle[numeric_cols[0]].iloc[-1]
-                else:
-                    return 85.0, 50.0  # 默认值
-        
-        # 获取初始容量（第一个循环）
-        if len(df_cycle) > 1:
-            if '放电容量(Ah)' in df_cycle.columns:
-                initial_capacity = df_cycle['放电容量(Ah)'].iloc[0]
-            elif possible_columns:
-                initial_capacity = df_cycle[possible_columns[0]].iloc[0]
-            elif len(numeric_cols) > 0:
-                initial_capacity = df_cycle[numeric_cols[0]].iloc[0]
-            else:
-                initial_capacity = discharge_capacity
-        else:
-            initial_capacity = discharge_capacity
-        
-        # 计算SOH
-        soh = (discharge_capacity / initial_capacity) * 100 if initial_capacity > 0 else 90.0
-        
-        # 确保SOH在合理范围内
-        soh = max(0, min(100, soh))
-        
-        # 增强的RUL计算 - 但保持SOH低于80%时RUL为0
-        cycle_count = len(df_cycle)
-        
-        # 如果SOH已经低于80%，直接返回RUL=0
-        if soh <= 80:
-            return soh, 0.0
-        
-        # 如果有足够的数据点，尝试使用非线性衰减模型
-        if use_nonlinear_model and cycle_count >= 5 and '放电容量(Ah)' in df_cycle.columns:
-            # 提取所有循环的容量数据
-            capacities = df_cycle['放电容量(Ah)'].values
-            cycles = np.arange(len(capacities))
-            
-            # 计算最近的衰减率（使用最后30%的数据或至少3个点）
-            recent_points = max(3, int(cycle_count * 0.3))
-            recent_capacities = capacities[-recent_points:]
-            recent_cycles = cycles[-recent_points:]
-            
-            if len(recent_capacities) > 1:
-                # 计算最近的衰减率
-                recent_decline = (recent_capacities[0] - recent_capacities[-1]) / len(recent_capacities)
-                recent_decline_percent = (recent_decline / initial_capacity) * 100
-                
-                # 应用加速因子 - 随着循环次数增加，衰减会加速
-                acceleration_factor = 1.0 + (cycle_count / 200)  # 随着循环次数增加，加速因子增大
-                future_decline_percent = recent_decline_percent * acceleration_factor
-                
-                # 计算RUL - 只计算达到80%SOH还需要的循环次数
-                remaining_soh = soh - 80
-                rul = remaining_soh / future_decline_percent if future_decline_percent > 0 else 50.0
-                
-                # 设置合理上限 - 基于电池类型和当前循环数
-                remaining_cycles = expected_total_cycles - cycle_count
-                rul = min(rul, remaining_cycles)
-                
-                # 确保RUL不为负且有合理上限
-                rul = max(0, min(rul, 200))  # 设置最大RUL为200循环
-                
-                return soh, rul
-        
-        # 如果没有足够数据或上面的方法失败，使用简化方法
-        # 计算平均SOH衰减率
-        if cycle_count > 1:
-            total_soh_decline = 100 - soh
-            avg_decline_per_cycle = total_soh_decline / cycle_count if cycle_count > 0 else 0.2
-            
-            # 应用加速因子
-            if use_nonlinear_model:
-                acceleration_factor = 1.0 + (cycle_count / 200)
-                future_decline_per_cycle = avg_decline_per_cycle * acceleration_factor
-            else:
-                future_decline_per_cycle = avg_decline_per_cycle
-            
-            # 计算RUL - 只计算达到80%SOH还需要的循环次数
-            remaining_soh = soh - 80
-            rul = remaining_soh / future_decline_per_cycle if future_decline_per_cycle > 0 else 50.0
-            
-            # 设置合理上限
-            remaining_cycles = expected_total_cycles - cycle_count
-            rul = min(rul, remaining_cycles)
-            
-            # 确保RUL不为负且有合理上限
-            rul = max(0, min(rul, 200))
-        else:
-            # 如果只有一个循环数据，使用默认值
-            rul = 50.0
-        
-        return soh, rul
-    
-    except Exception as e:
-        st.error(f"预测过程中出错: {e}")
-        return 90.0, 50.0  # 默认值
+# 显示数据预览
+st.subheader("数据预览")
+st.dataframe(st.session_state.data.head())
 
-# 文件选择和处理函数
-def handle_file_selection(data_source):
-    """处理不同数据源的文件选择"""
-    uploaded_file = None
-    selected_file_path = None
-    
-    if data_source == "本地文件上传":
-        uploaded_file = st.file_uploader("上传电池测试数据 (Excel格式)", type=["xlsx", "xls"])
-        return uploaded_file, None
-    
-    elif data_source == "服务器连接":
-        if st.session_state.connection_manager.connection_status == 'connected':
-            st.markdown("### 服务器文件浏览")
-            
-            # 远程目录输入
-            remote_dir = st.text_input("远程目录路径", value="/home", 
-                                     placeholder="输入要浏览的目录路径")
-            
-            if st.button("浏览目录"):
-                with st.spinner("获取文件列表..."):
-                    data_files = st.session_state.connection_manager.get_remote_data_files(remote_dir)
-                
-                if data_files:
-                    st.session_state.remote_data_files = data_files
-                else:
-                    st.warning("未找到数据文件或目录不存在")
-            
-            # 显示文件列表
-            if 'remote_data_files' in st.session_state and st.session_state.remote_data_files:
-                st.markdown("#### 可用的数据文件:")
-                
-                selected_file = st.selectbox(
-                    "选择文件:",
-                    st.session_state.remote_data_files,
-                    format_func=lambda x: os.path.basename(x)
-                )
-                
-                if st.button("下载并分析文件"):
-                    with st.spinner("下载文件中..."):
-                        # 创建临时文件
-                        temp_file = tempfile.NamedTemporaryFile(delete=False, 
-                                                              suffix=os.path.splitext(selected_file)[1])
-                        
-                        success = st.session_state.connection_manager.download_file(
-                            selected_file, temp_file.name
-                        )
-                        
-                        if success:
-                            st.success("文件下载成功！")
-                            selected_file_path = temp_file.name
-                        else:
-                            st.error(f"文件下载失败: {st.session_state.connection_manager.last_error}")
-                            os.unlink(temp_file.name)
-        else:
-            st.warning("请先连接到服务器")
-            return None, None
-    
-    elif data_source == "GitHub仓库":
-        if 'github_data_files' in st.session_state and st.session_state.github_data_files:
-            st.markdown("### GitHub数据文件")
-            
-            selected_file = st.selectbox(
-                "选择数据文件:",
-                st.session_state.github_data_files,
-                format_func=lambda x: os.path.basename(x)
-            )
-            
-            if st.button("分析选中文件"):
-                selected_file_path = selected_file
-        else:
-            st.info("请先从GitHub获取数据")
-            return None, None
-    
-    return uploaded_file, selected_file_path
+st.info(f"数据形状: {st.session_state.data.shape[0]} 行, {st.session_state.data.shape[1]} 列")
 
-# 主应用
-def main():
-    # 处理文件选择
-    uploaded_file, selected_file_path = handle_file_selection(data_source)
-    
-    # 添加高级选项
-    with st.expander("高级选项"):
-        use_nonlinear_model = st.checkbox("启用非线性衰减模型", value=True, 
-                                         help="考虑电池在生命周期后期加速衰减的特性")
-        expected_total_cycles = st.slider("预期总循环寿命", min_value=100, max_value=1000, value=500,
-                                         help="设置电池预期的总循环寿命，用于限制RUL预测的上限")
-        st.info("注意：无论使用何种模型，当SOH低于80%时，RUL将始终为0，表示电池已达到寿命终点。")
-    
-    # 处理文件数据
-    df_cycle = None
-    
-    if uploaded_file is not None:
-        df_cycle = process_uploaded_file(uploaded_file)
-    elif selected_file_path is not None:
-        df_cycle = process_file_path(selected_file_path)
-    
-    if df_cycle is not None:
-        # 显示数据概览
-        st.markdown("## 数据概览")
-        st.dataframe(df_cycle.head())
-        st.text(f"总行数: {len(df_cycle)}")
-        
-        # 数据分析
-        st.markdown("## 数据分析")
-        
-        # 检查数据列
-        numeric_cols = df_cycle.select_dtypes(include=[np.number]).columns.tolist()
-        st.write("检测到的数值列:")
-        st.write(", ".join(numeric_cols))
-        
-        # 如果有足够的数据，显示一些基本统计信息
-        if len(df_cycle) > 1 and len(numeric_cols) > 0:
-            # 选择第一个数值列进行可视化
-            selected_col = st.selectbox("选择要分析的列:", numeric_cols)
-            
-            # 创建简单的趋势图
-            fig, ax = plt.subplots(figsize=(10, 6))
-            ax.plot(df_cycle.index, df_cycle[selected_col], marker='o', linestyle='-')
-            ax.set_title(f"{selected_col}随循环次数的变化")
-            ax.set_xlabel("循环索引")
-            ax.set_ylabel(selected_col)
-            ax.grid(True)
-            st.pyplot(fig)
-        
-        # 预测SOH和RUL
-        st.markdown("## 预测结果")
-        soh_pred, rul_pred = predict_battery(df_cycle, use_nonlinear_model, expected_total_cycles)
-        
-        # 显示预测结果
-        display_prediction_results(soh_pred, rul_pred, df_cycle, use_nonlinear_model, expected_total_cycles)
-    
-    else:
-        # 如果没有数据，显示示例和说明
-        display_example_and_manual_input(use_nonlinear_model, expected_total_cycles)
-    
-    # 添加页脚
-    st.markdown("---")
-    st.markdown("© 2025 唐光盛-浙江锋锂团队& 基于机器学习的电池健康状态和剩余使用寿命预测")
+# 显示列信息
+st.subheader("列信息")
+col_info = pd.DataFrame({
+'列名': st.session_state.data.columns,
+'数据类型': st.session_state.data.dtypes.astype(str),
+'非空值数量': st.session_state.data.count().values,
+'空值数量': st.session_state.data.isna().sum().values,
+'唯一值数量': [st.session_state.data[col].nunique() for col in st.session_state.data.columns]
+})
+st.dataframe(col_info)
 
-def process_uploaded_file(uploaded_file):
-    """处理上传的文件"""
-    try:
-        # 读取Excel文件
-        try:
-            # 尝试读取所有工作表
-            excel_file = pd.ExcelFile(uploaded_file)
-            sheet_names = excel_file.sheet_names
-            
-            # 检查是否有'cycle'工作表
-            if 'cycle' in sheet_names:
-                df_cycle = pd.read_excel(excel_file, sheet_name='cycle')
-                st.success("成功读取'cycle'工作表！")
-            else:
-                # 如果没有'cycle'工作表，使用第一个工作表
-                df_cycle = pd.read_excel(excel_file, sheet_name=0)
-                st.info(f"未找到'cycle'工作表，使用'{sheet_names[0]}'工作表进行分析。")
-        except Exception as e:
-            st.warning(f"读取Excel文件时出错: {e}")
-            # 尝试直接读取第一个工作表
-            df_cycle = pd.read_excel(uploaded_file)
-        
-        return df_cycle
-        
-    except Exception as e:
-        st.error(f"处理文件时出错: {e}")
-        st.info("请确保上传的Excel文件包含电池循环测试数据。")
-        return None
+# 下一步按钮
+if st.button("继续到数据预处理"):
+st.session_state.current_step = 2
+st.rerun()
 
-def process_file_path(file_path):
-    """处理文件路径"""
-    try:
-        if file_path.endswith(('.xlsx', '.xls')):
-            # Excel文件
-            try:
-                excel_file = pd.ExcelFile(file_path)
-                sheet_names = excel_file.sheet_names
-                
-                if 'cycle' in sheet_names:
-                    df_cycle = pd.read_excel(excel_file, sheet_name='cycle')
-                    st.success("成功读取'cycle'工作表！")
-                else:
-                    df_cycle = pd.read_excel(excel_file, sheet_name=0)
-                    st.info(f"未找到'cycle'工作表，使用'{sheet_names[0]}'工作表进行分析。")
-            except Exception as e:
-                st.warning(f"读取Excel文件时出错: {e}")
-                df_cycle = pd.read_excel(file_path)
-        
-        elif file_path.endswith('.csv'):
-            # CSV文件
-            df_cycle = pd.read_csv(file_path)
-            st.success("成功读取CSV文件！")
-        
-        else:
-            st.error("不支持的文件格式")
-            return None
-        
-        return df_cycle
-        
-    except Exception as e:
-        st.error(f"处理文件时出错: {e}")
-        return None
-    finally:
-        # 清理临时文件
-        if file_path and os.path.exists(file_path) and file_path.startswith(tempfile.gettempdir()):
-            try:
-                os.unlink(file_path)
-            except:
-                pass
+except Exception as e:
+st.error(f"加载数据时出错: {str(e)}")
 
-def display_prediction_results(soh_pred, rul_pred, df_cycle, use_nonlinear_model, expected_total_cycles):
-    """显示预测结果"""
-    # 显示预测结果
-    col1, col2 = st.columns(2)
-    
-    with col1:
-        st.metric("电池健康状态 (SOH)", f"{soh_pred:.2f}%")
-        
-        # 添加SOH状态解释
-        if soh_pred >= 90:
-            st.success("电池状态良好，可以继续使用。")
-        elif soh_pred >= 80:
-            st.info("电池状态正常，但已有轻微老化。")
-        elif soh_pred >= 60:
-            st.warning("电池已明显老化，建议密切监控。")
-        else:
-            st.error("电池严重老化，建议尽快更换。")
-    
-    with col2:
-        st.metric("剩余使用寿命 (RUL)", f"{rul_pred:.2f} 循环")
-        
-        # 添加RUL状态解释 - 混合版本
-        if rul_pred > 50:
-            st.success("电池剩余寿命充足。")
-        elif rul_pred > 20:
-            st.info("电池剩余寿命适中，可继续使用一段时间。")
-        elif rul_pred > 0:
-            st.warning("电池剩余寿命较短，建议准备更换。")
-        else:
-            st.error("电池已达到寿命终点，建议尽快更换。")
-    
-    # 创建并显示可视化
-    st.markdown("## 预测结果可视化")
-    plot_data = create_prediction_plot(soh_pred, rul_pred)
-    st.image(f"data:image/png;base64,{plot_data}", use_column_width=True)
-    
-    # 添加预测结果解释 - 混合版本
-    st.markdown("## 结果解释")
-    st.write(f"""
-    - **电池健康状态 (SOH)**: {soh_pred:.2f}% 表示电池当前的容量相对于初始容量的百分比。
-      SOH值越高，表示电池状态越好。一般认为SOH低于80%时，电池性能开始明显下降。
-    
-    - **剩余使用寿命 (RUL)**: {rul_pred:.2f} 循环表示在当前使用条件下，电池预计还能完成的充放电循环次数。
-      
-      RUL计算基于以下标准：
-      * 当SOH > 80%时：使用增强算法计算达到80%SOH还需要的循环次数
-      * 当SOH ≤ 80%时：RUL为0，表示电池已达到寿命终点
-      
-      增强算法考虑了以下因素：
-      * {'非线性衰减：电池在生命周期后期通常会加速衰减' if use_nonlinear_model else '线性衰减：假设电池以恒定速率衰减'}
-      * 最近趋势：优先考虑最近的衰减数据
-      * 合理上限：基于预期总循环寿命({expected_total_cycles}循环)设置上限
-    """)
-    
-    # 添加建议 - 混合版本
-    st.markdown("## 使用建议")
-    if soh_pred >= 90 and rul_pred >= 50:
-        st.success("电池状态优良，可以继续正常使用，无需特别关注。")
-    elif soh_pred >= 80 and rul_pred >= 20:
-        st.info("电池状态良好，建议定期监测SOH变化趋势。")
-    elif soh_pred >= 80 and rul_pred > 0:
-        st.warning("电池状态尚可，但剩余寿命较短，建议准备更换电池。")
-    else:
-        st.error("电池已达到寿命终点，建议尽快更换电池，以避免可能的性能问题或安全隐患。")
-    
-    # 添加详细分析 - 增强功能
-    if len(df_cycle) > 5 and '放电容量(Ah)' in df_cycle.columns:
-        display_detailed_analysis(df_cycle, soh_pred, rul_pred, use_nonlinear_model, expected_total_cycles)
+# 2. 数据预处理页面
+elif st.session_state.current_step == 2:
+st.title("2. 数据预处理")
 
-def display_detailed_analysis(df_cycle, soh_pred, rul_pred, use_nonlinear_model, expected_total_cycles):
-    """显示详细分析"""
-    st.markdown("## 详细分析")
-    
-    # 容量衰减趋势分析
-    capacities = df_cycle['放电容量(Ah)'].values
-    cycles = np.arange(len(capacities))
-    initial_capacity = capacities[0]
-    
-    # 计算衰减率
-    if len(capacities) > 1:
-        total_decline = capacities[0] - capacities[-1]
-        avg_decline_per_cycle = total_decline / (len(capacities) - 1)
-        
-        # 计算最近的衰减率
-        recent_points = max(3, int(len(capacities) * 0.3))
-        recent_capacities = capacities[-recent_points:]
-        recent_decline = (recent_capacities[0] - recent_capacities[-1]) / len(recent_capacities)
-        
-        # 创建容量衰减趋势图
-        fig, ax = plt.subplots(figsize=(10, 6))
-        ax.plot(cycles, capacities, marker='o', linestyle='-', label='实际容量')
-        
-        # 如果SOH > 80%，预测未来趋势
-        if soh_pred > 80:
-            # 预测未来趋势
-            future_cycles = np.arange(len(capacities), len(capacities) + int(rul_pred) + 10)
-            
-            if use_nonlinear_model:
-                # 非线性预测
-                acceleration_factor = 1.0 + (len(capacities) / 200)
-                future_decline = recent_decline * acceleration_factor
-                future_capacities = [capacities[-1]]
-                
-                for i in range(1, len(future_cycles)):
-                    next_capacity = future_capacities[-1] - future_decline
-                    future_capacities.append(max(0, next_capacity))
-                
-                ax.plot(future_cycles, future_capacities, linestyle='--', color='red', label='预测趋势(非线性)')
-            else:
-                # 线性预测
-                future_capacities = [capacities[-1] - avg_decline_per_cycle * i for i in range(1, len(future_cycles) + 1)]
-                ax.plot(future_cycles, future_capacities, linestyle='--', color='green', label='预测趋势(线性)')
-            
-            # 标记80% SOH点
-            eol_capacity = initial_capacity * 0.8
-            ax.axhline(y=eol_capacity, color='r', linestyle='-', alpha=0.5, label='80% SOH (寿命终点)')
-        
-        ax.set_title('电池容量衰减趋势分析')
-        ax.set_xlabel('循环次数')
-        ax.set_ylabel('放电容量 (Ah)')
-        ax.grid(True)
-        ax.legend()
-        st.pyplot(fig)
-        
-        # 显示衰减率信息
-        st.markdown("### 容量衰减率分析")
-        col1, col2, col3 = st.columns(3)
-        with col1:
-            st.metric("初始容量", f"{capacities[0]:.4f} Ah")
-        with col2:
-            st.metric("当前容量", f"{capacities[-1]:.4f} Ah")
-        with col3:
-            st.metric("总衰减量", f"{total_decline:.4f} Ah")
-        
-        col1, col2, col3 = st.columns(3)
-        with col1:
-            st.metric("平均衰减率", f"{avg_decline_per_cycle:.6f} Ah/循环")
-        with col2:
-            st.metric("最近衰减率", f"{recent_decline:.6f} Ah/循环")
-        with col3:
-            if use_nonlinear_model:
-                acceleration_factor = 1.0 + (len(capacities) / 200)
-                st.metric("加速因子", f"{acceleration_factor:.2f}")
+if st.session_state.data is None:
+st.warning("请先上传数据文件")
+if st.button("返回数据上传"):
+st.session_state.current_step = 1
+st.rerun()
+else:
+st.write("选择数据预处理选项")
 
-def display_example_and_manual_input(use_nonlinear_model, expected_total_cycles):
-    """显示示例和手动输入选项"""
-    st.info("请选择数据来源或上传电池测试数据文件以获取预测结果。")
-    
-    # 显示示例图片
-    st.markdown("## 示例预测结果")
-    example_soh = 92.5
-    example_rul = 65.3
-    example_plot = create_prediction_plot(example_soh, example_rul)
-    st.image(f"data:image/png;base64,{example_plot}", use_column_width=True)
-    
-    # 添加交互式输入选项
-    st.markdown("## 或者直接输入电池参数")
-    
-    col1, col2 = st.columns(2)
-    
-    with col1:
-        initial_capacity = st.number_input("初始放电容量(Ah)", min_value=0.1, max_value=20.0, value=9.5, step=0.1)
-    
-    with col2:
-        current_capacity = st.number_input("当前放电容量(Ah)", min_value=0.0, max_value=20.0, value=8.5, step=0.1)
-    
-    cycles_completed = st.slider("已完成的循环次数", min_value=1, max_value=500, value=20)
-    
-    if st.button("预测", type="primary"):
-        # 计算SOH
-        manual_soh = (current_capacity / initial_capacity) * 100
-        
-        # 如果SOH低于80%，RUL直接为0
-        if manual_soh <= 80:
-            manual_rul = 0.0
-        else:
-            # 计算SOH衰减率
-            soh_decline = 100 - manual_soh
-            avg_decline_per_cycle = soh_decline / cycles_completed if cycles_completed > 0 else 0.2
-            
-            # 应用增强功能
-            if use_nonlinear_model:
-                # 应用加速因子
-                acceleration_factor = 1.0 + (cycles_completed / 200)
-                future_decline_per_cycle = avg_decline_per_cycle * acceleration_factor
-            else:
-                future_decline_per_cycle = avg_decline_per_cycle
-            
-            # 计算RUL - 只计算达到80%SOH还需要的循环次数
-            remaining_soh = manual_soh - 80
-            manual_rul = remaining_soh / future_decline_per_cycle if future_decline_per_cycle > 0 else 50.0
-            
-            # 设置合理上限
-            remaining_cycles = expected_total_cycles - cycles_completed
-            manual_rul = min(manual_rul, remaining_cycles)
-            
-            # 确保RUL不为负且有合理上限
-            manual_rul = max(0, min(manual_rul, 200))
-        
-        # 显示预测结果
-        col1, col2 = st.columns(2)
-        
-        with col1:
-            st.metric("电池健康状态 (SOH)", f"{manual_soh:.2f}%")
-            
-            # 添加SOH状态解释
-            if manual_soh >= 90:
-                st.success("电池状态良好，可以继续使用。")
-            elif manual_soh >= 80:
-                st.info("电池状态正常，但已有轻微老化。")
-            elif manual_soh >= 60:
-                st.warning("电池已明显老化，建议密切监控。")
-            else:
-                st.error("电池严重老化，建议尽快更换。")
-        
-        with col2:
-            st.metric("剩余使用寿命 (RUL)", f"{manual_rul:.2f} 循环")
-            
-            # 添加RUL状态解释 - 混合版本
-            if manual_rul > 50:
-                st.success("电池剩余寿命充足。")
-            elif manual_rul > 20:
-                st.info("电池剩余寿命适中，可继续使用一段时间。")
-            elif manual_rul > 0:
-                st.warning("电池剩余寿命较短，建议准备更换。")
-            else:
-                st.error("电池已达到寿命终点，建议尽快更换。")
-        
-        # 创建并显示可视化
-        manual_plot = create_prediction_plot(manual_soh, manual_rul)
-        st.image(f"data:image/png;base64,{manual_plot}", use_column_width=True)
-        
-        # 显示计算详情
-        st.markdown("### 计算详情")
-        st.write(f"""
-        - 初始容量: {initial_capacity:.2f} Ah
-        - 当前容量: {current_capacity:.2f} Ah
-        - 已完成循环: {cycles_completed} 循环
-        - SOH: {manual_soh:.2f}%
-        - {'SOH低于80%，RUL直接设为0' if manual_soh <= 80 else ''}
-        """)
-        
-        if manual_soh > 80:
-            avg_decline_per_cycle = (100 - manual_soh) / cycles_completed if cycles_completed > 0 else 0.2
-            if use_nonlinear_model:
-                acceleration_factor = 1.0 + (cycles_completed / 200)
-                future_decline_per_cycle = avg_decline_per_cycle * acceleration_factor
-                st.write(f"""
-                - 平均衰减率: {avg_decline_per_cycle:.4f}% / 循环
-                - 应用加速因子: {acceleration_factor:.2f}
-                - 预期未来衰减率: {future_decline_per_cycle:.4f}% / 循环
-                - 预期总循环寿命: {expected_total_cycles} 循环
-                """)
-            else:
-                st.write(f"""
-                - 平均衰减率: {avg_decline_per_cycle:.4f}% / 循环
-                - 未应用加速因子
-                - 预期总循环寿命: {expected_total_cycles} 循环
-                """)
+col1, col2 = st.columns(2)
 
-if __name__ == "__main__":
-    main()
+with col1:
+st.subheader("选择列")
+cycle_col = st.selectbox("循环次数列", st.session_state.data.columns)
+voltage_col = st.selectbox("电压列", st.session_state.data.columns)
+current_col = st.selectbox("电流列", st.session_state.data.columns)
+time_col = st.selectbox("时间列", st.session_state.data.columns)
 
+capacity_col = st.selectbox(
+"容量列 (可选)", 
+["无"] + list(st.session_state.data.columns)
+)
+capacity_col = None if capacity_col == "无" else capacity_col
+
+temp_col = st.selectbox(
+"温度列 (可选)", 
+["无"] + list(st.session_state.data.columns)
+)
+temp_col = None if temp_col == "无" else temp_col
+
+with col2:
+st.subheader("预处理选项")
+remove_outliers = st.checkbox("移除异常值", value=True)
+fill_missing = st.checkbox("填充缺失值", value=True)
+normalize_data = st.checkbox("标准化数据", value=True)
+
+outlier_threshold = st.slider(
+"异常值阈值 (标准差倍数)", 
+min_value=1.0, 
+max_value=5.0, 
+value=3.0, 
+step=0.1
+)
+
+if st.button("执行数据预处理"):
+try:
+with st.spinner("正在预处理数据..."):
+# 创建预处理器
+preprocessor = BatteryDataPreprocessor(st.session_state.data)
+
+# 执行预处理
+preprocessor.preprocess_data(
+cycle_col=cycle_col,
+voltage_col=voltage_col,
+current_col=current_col,
+time_col=time_col,
+capacity_col=capacity_col,
+temp_col=temp_col,
+remove_outliers=remove_outliers,
+fill_missing=fill_missing,
+normalize=normalize_data,
+outlier_threshold=outlier_threshold
+)
+
+# 更新会话状态
+st.session_state.data = preprocessor.processed_data
+
+# 显示预处理结果
+st.success("数据预处理完成！")
+st.subheader("预处理后的数据")
+st.dataframe(st.session_state.data.head())
+
+# 显示预处理统计信息
+st.subheader("预处理统计信息")
+stats = {
+"原始数据行数": preprocessor.original_data.shape[0],
+"预处理后行数": preprocessor.processed_data.shape[0],
+"移除的异常值数": preprocessor.original_data.shape[0] - preprocessor.processed_data.shape[0] if remove_outliers else 0,
+"填充的缺失值数": preprocessor.missing_values_filled if fill_missing else 0
+}
+st.json(stats)
+
+# 保存预处理后的数据
+preprocessed_file = os.path.join(OUTPUT_FOLDER, "preprocessed_data.csv")
+st.session_state.data.to_csv(preprocessed_file, index=False)
+
+# 提供下载链接
+with open(preprocessed_file, "rb") as file:
+st.download_button(
+label="下载预处理后的数据",
+data=file,
+file_name="preprocessed_data.csv",
+mime="text/csv"
+)
+
+except Exception as e:
+st.error(f"预处理数据时出错: {str(e)}")
+
+# 导航按钮
+col1, col2 = st.columns(2)
+with col1:
+if st.button("返回数据上传"):
+st.session_state.current_step = 1
+st.rerun()
+with col2:
+if st.button("继续到探索性分析"):
+st.session_state.current_step = 3
+st.rerun()
+
+# 3. 探索性分析页面
+elif st.session_state.current_step == 3:
+st.title("3. 探索性数据分析")
+
+if st.session_state.data is None:
+st.warning("请先上传并预处理数据")
+if st.button("返回数据预处理"):
+st.session_state.current_step = 2
+st.rerun()
+else:
+st.write("选择探索性分析选项")
+
+col1, col2 = st.columns(2)
+
+with col1:
+st.subheader("选择列")
+cycle_col = st.selectbox("循环次数列", st.session_state.data.columns)
+voltage_col = st.selectbox("电压列", st.session_state.data.columns)
+current_col = st.selectbox("电流列", st.session_state.data.columns)
+
+capacity_col = st.selectbox(
+"容量列 (可选)", 
+["无"] + list(st.session_state.data.columns)
+)
+capacity_col = None if capacity_col == "无" else capacity_col
+
+with col2:
+st.subheader("分析选项")
+show_summary = st.checkbox("显示数据摘要", value=True)
+show_distributions = st.checkbox("显示分布图", value=True)
+show_correlations = st.checkbox("显示相关性矩阵", value=True)
+show_capacity_fade = st.checkbox("显示容量退化曲线", value=True)
+
+if st.button("执行探索性分析"):
+try:
+with st.spinner("正在分析数据..."):
+# 创建数据探索器
+explorer = BatteryDataExplorer(st.session_state.data)
+
+# 数据摘要
+if show_summary:
+st.subheader("数据摘要")
+st.dataframe(st.session_state.data.describe())
+
+# 分布图
+if show_distributions:
+st.subheader("数据分布")
+
+# 选择要显示的列
+cols_to_plot = st.multiselect(
+"选择要显示分布的列",
+st.session_state.data.select_dtypes(include=np.number).columns.tolist(),
+default=[voltage_col, current_col]
+)
+
+if cols_to_plot:
+fig = explorer.plot_distributions(cols_to_plot)
+st.pyplot(fig)
+
+# 相关性矩阵
+if show_correlations:
+st.subheader("相关性矩阵")
+fig = explorer.plot_correlation_matrix()
+st.pyplot(fig)
+
+# 容量退化曲线
+if show_capacity_fade and capacity_col:
+st.subheader("容量退化曲线")
+fig = explorer.plot_capacity_fade(cycle_col, capacity_col)
+st.pyplot(fig)
+
+# 计算SOH
+st.subheader("健康状态 (SOH) 曲线")
+fig = explorer.plot_soh_curve(cycle_col, capacity_col)
+st.pyplot(fig)
+
+# 电压-电流关系
+st.subheader("电压-电流关系")
+fig = explorer.plot_voltage_current_relationship(voltage_col, current_col, cycle_col)
+st.pyplot(fig)
+
+# 保存分析结果
+output_file = os.path.join(OUTPUT_FOLDER, "eda_results.png")
+fig.savefig(output_file, bbox_inches='tight')
+
+st.success("探索性数据分析完成！")
+
+except Exception as e:
+st.error(f"分析数据时出错: {str(e)}")
+
+# 导航按钮
+col1, col2 = st.columns(2)
+with col1:
+if st.button("返回数据预处理"):
+st.session_state.current_step = 2
+st.rerun()
+with col2:
+if st.button("继续到特征提取"):
+st.session_state.current_step = 4
+st.rerun()
+
+# 4. 特征提取页面
+elif st.session_state.current_step == 4:
+st.title("4. 特征提取")
+
+if st.session_state.data is None:
+st.warning("请先上传并预处理数据")
+if st.button("返回探索性分析"):
+st.session_state.current_step = 3
+st.rerun()
+else:
+st.write("选择特征提取选项")
+
+col1, col2 = st.columns(2)
+
+with col1:
+st.subheader("选择列")
+cycle_col = st.selectbox("循环次数列", st.session_state.data.columns)
+voltage_col = st.selectbox("电压列", st.session_state.data.columns)
+current_col = st.selectbox("电流列", st.session_state.data.columns)
+time_col = st.selectbox("时间列", st.session_state.data.columns)
+
+capacity_col = st.selectbox(
+"容量列 (可选)", 
+["无"] + list(st.session_state.data.columns)
+)
+capacity_col = None if capacity_col == "无" else capacity_col
+
+with col2:
+st.subheader("特征提取选项")
+extract_time_domain = st.checkbox("提取时域特征", value=True)
+extract_frequency_domain = st.checkbox("提取频域特征", value=True)
+extract_wavelet = st.checkbox("提取小波特征", value=True)
+extract_incremental = st.checkbox("提取增量特征", value=True)
+extract_ic_curve = st.checkbox("提取IC曲线特征", value=True)
+
+if st.button("执行特征提取"):
+try:
+with st.spinner("正在提取特征..."):
+# 创建特征提取器
+extractor = BatteryFeatureExtractor(st.session_state.data)
+
+# 提取特征
+if extract_time_domain:
+extractor.extract_time_domain_features(
+cycle_col=cycle_col,
+voltage_col=voltage_col,
+current_col=current_col,
+time_col=time_col,
+capacity_col=capacity_col
+)
+
+if extract_frequency_domain:
+extractor.extract_frequency_domain_features(
+cycle_col=cycle_col,
+voltage_col=voltage_col,
+current_col=current_col,
+time_col=time_col
+)
+
+if extract_wavelet:
+extractor.extract_wavelet_features(
+cycle_col=cycle_col,
+voltage_col=voltage_col,
+current_col=current_col,
+time_col=time_col
+)
+
+if extract_ic_curve and capacity_col:
+extractor.extract_ic_curve_features(
+cycle_col=cycle_col,
+voltage_col=voltage_col,
+current_col=current_col,
+capacity_col=capacity_col
+)
+
+if extract_incremental:
+features_df = extractor.extract_incremental_features(cycle_col)
+else:
+features_df = extractor.features
+
+# 更新会话状态
+st.session_state.features = features_df
+
+# 显示提取的特征
+st.success("特征提取完成！")
+st.subheader("提取的特征")
+st.dataframe(features_df.head())
+
+# 显示特征统计信息
+st.subheader("特征统计信息")
+st.info(f"共提取了 {features_df.shape[1]-1} 个特征，覆盖 {features_df.shape[0]} 个循环")
+
+# 特征重要性可视化
+if 'SOH' in features_df.columns:
+st.subheader("特征与SOH的相关性")
+
+# 计算与SOH的相关性
+corr_with_soh = features_df.corr()['SOH'].sort_values(ascending=False)
+corr_with_soh = corr_with_soh.drop('SOH')
+
+# 显示前10个最相关的特征
+fig, ax = plt.subplots(figsize=(10, 6))
+corr_with_soh.head(10).plot(kind='bar', ax=ax)
+plt.title('与SOH最相关的10个特征')
+plt.ylabel('相关系数')
+plt.tight_layout()
+st.pyplot(fig)
+
+# 保存提取的特征
+features_file = os.path.join(OUTPUT_FOLDER, "extracted_features.csv")
+features_df.to_csv(features_file, index=False)
+
+# 提供下载链接
+with open(features_file, "rb") as file:
+st.download_button(
+label="下载提取的特征",
+data=file,
+file_name="extracted_features.csv",
+mime="text/csv"
+)
+
+except Exception as e:
+st.error(f"提取特征时出错: {str(e)}")
+
+# 导航按钮
+col1, col2 = st.columns(2)
+with col1:
+if st.button("返回探索性分析"):
+st.session_state.current_step = 3
+st.rerun()
+with col2:
+if st.button("继续到模型训练"):
+st.session_state.current_step = 5
+st.rerun()
+
+# 5. 模型训练页面
+elif st.session_state.current_step == 5:
+st.title("5. 模型训练")
+
+if st.session_state.features is None:
+st.warning("请先提取特征")
+if st.button("返回特征提取"):
+st.session_state.current_step = 4
+st.rerun()
+else:
+st.write("选择模型训练选项")
+
+col1, col2 = st.columns(2)
+
+with col1:
+st.subheader("目标与特征")
+
+# 选择目标列
+target_options = ["SOH"]
+if "capacity_max" in st.session_state.features.columns:
+target_options.append("capacity_max")
+
+target_col = st.selectbox("目标列", target_options)
+
+# 选择特征列
+feature_cols = st.multiselect(
+"特征列 (可选，默认使用所有数值特征)",
+[col for col in st.session_state.features.columns if col != target_col and col != 'cycle'],
+default=[]
+)
+
+# 如果没有选择特征，使用所有数值特征
+if not feature_cols:
+feature_cols = [col for col in st.session_state.features.columns 
+if col != target_col and col != 'cycle' 
+and np.issubdtype(st.session_state.features[col].dtype, np.number)]
+
+# 训练集比例
+train_ratio = st.slider("训练集比例", 0.5, 0.9, 0.8, 0.05)
+
+with col2:
+st.subheader("模型选择")
+
+model_type = st.selectbox(
+"模型类型",
+["SVR", "随机森林", "XGBoost", "LightGBM", "LSTM"]
+)
+
+# 根据模型类型显示不同的参数
+if model_type == "SVR":
+kernel = st.selectbox("核函数", ["rbf", "linear", "poly", "sigmoid"])
+C = st.slider("正则化参数 C", 0.1, 10.0, 1.0, 0.1)
+epsilon = st.slider("Epsilon", 0.01, 0.5, 0.1, 0.01)
+model_params = {"kernel": kernel, "C": C, "epsilon": epsilon}
+
+elif model_type == "随机森林":
+n_estimators = st.slider("树的数量", 10, 200, 100, 10)
+max_depth = st.slider("最大深度", 3, 20, 10, 1)
+model_params = {"n_estimators": n_estimators, "max_depth": max_depth}
+
+elif model_type == "XGBoost":
+n_estimators = st.slider("树的数量", 10, 200, 100, 10)
+learning_rate = st.slider("学习率", 0.01, 0.3, 0.1, 0.01)
+max_depth = st.slider("最大深度", 3, 10, 6, 1)
+model_params = {
+"n_estimators": n_estimators, 
+"learning_rate": learning_rate,
+"max_depth": max_depth
+}
+
+elif model_type == "LightGBM":
+n_estimators = st.slider("树的数量", 10, 200, 100, 10)
+learning_rate = st.slider("学习率", 0.01, 0.3, 0.1, 0.01)
+max_depth = st.slider("最大深度", 3, 10, 6, 1)
+model_params = {
+"n_estimators": n_estimators, 
+"learning_rate": learning_rate,
+"max_depth": max_depth
+}
+
+elif model_type == "LSTM":
+units = st.slider("LSTM单元数", 16, 128, 64, 8)
+epochs = st.slider("训练轮数", 10, 200, 50, 10)
+batch_size = st.slider("批量大小", 8, 64, 32, 8)
+model_params = {
+"units": units, 
+"epochs": epochs,
+"batch_size": batch_size
+}
+
+if st.button("训练模型"):
+try:
+with st.spinner("正在训练模型..."):
+# 创建模型
+model = BatteryPredictionModel()
+
+# 训练模型
+model.train_model(
+data=st.session_state.features,
+target_col=target_col,
+feature_cols=feature_cols,
+model_type=model_type,
+model_params=model_params,
+train_ratio=train_ratio
+)
+
+# 更新会话状态
+st.session_state.model = model
+st.session_state.model_name = model_type
+st.session_state.feature_cols = feature_cols
+st.session_state.target_col = target_col
+
+# 显示训练结果
+st.success(f"{model_type} 模型训练完成！")
+
+# 显示模型评估指标
+st.subheader("模型评估")
+metrics = model.evaluate_model()
+
+col1, col2, col3, col4 = st.columns(4)
+col1.metric("R²", f"{metrics['r2']:.4f}")
+col2.metric("MAE", f"{metrics['mae']:.4f}")
+col3.metric("MSE", f"{metrics['mse']:.4f}")
+col4.metric("RMSE", f"{metrics['rmse']:.4f}")
+
+# 显示预测vs实际值图
+st.subheader("预测 vs 实际值")
+fig = model.plot_prediction_vs_actual()
+st.pyplot(fig)
+
+# 保存模型
+model_file = os.path.join(MODELS_FOLDER, f"{model_type.lower()}_model.pkl")
+joblib.dump(model, model_file)
+
+st.info(f"模型已保存到 {model_file}")
+
+except Exception as e:
+st.error(f"训练模型时出错: {str(e)}")
+
+# 导航按钮
+col1, col2 = st.columns(2)
+with col1:
+if st.button("返回特征提取"):
+st.session_state.current_step = 4
+st.rerun()
+with col2:
+if st.button("继续到预测与评估"):
+st.session_state.current_step = 6
+st.rerun()
+
+# 6. 预测与评估页面
+elif st.session_state.current_step == 6:
+st.title("6. 预测与评估")
+
+if st.session_state.model is None:
+st.warning("请先训练模型")
+if st.button("返回模型训练"):
+st.session_state.current_step = 5
+st.rerun()
+else:
+st.write(f"使用 {st.session_state.model_name} 模型进行预测")
+
+col1, col2 = st.columns(2)
+
+with col1:
+st.subheader("SOH预测")
+
+# 选择要预测的循环
+max_cycle = st.session_state.features['cycle'].max()
+cycles_to_predict = st.slider(
+"预测循环数",
+int(max_cycle * 0.1),
+int(max_cycle * 2),
+int(max_cycle * 1.5),
+step=10
+)
+
+# EOL阈值
+eol_threshold = st.slider(
+"EOL阈值 (SOH百分比)",
+50, 90, 80, 1
+) / 100.0
+
+with col2:
+st.subheader("预测选项")
+
+# 预测方法
+prediction_method = st.selectbox(
+"预测方法",
+["直接预测", "递归预测", "集成预测"]
+)
+
+# 置信区间
+show_confidence = st.checkbox("显示置信区间", value=True)
+confidence_level = st.slider("置信水平", 0.8, 0.99, 0.95, 0.01)
+
+if st.button("执行预测"):
+try:
+with st.spinner("正在预测..."):
+model = st.session_state.model
+
+# 预测SOH
+st.subheader("SOH预测结果")
+
+# 获取预测结果
+predictions, confidence = model.predict_future(
+cycles_to_predict=cycles_to_predict,
+prediction_method=prediction_method,
+confidence_level=confidence_level if show_confidence else None
+)
+
+# 显示预测图
+fig = model.plot_predictions(
+predictions=predictions,
+confidence=confidence if show_confidence else None,
+eol_threshold=eol_threshold
+)
+st.pyplot(fig)
+
+# 计算RUL
+rul = model.calculate_rul(
+predictions=predictions,
+eol_threshold=eol_threshold
+)
+
+# 显示RUL
+st.subheader("剩余使用寿命 (RUL) 预测")
+st.info(f"预测RUL: {rul} 循环")
+
+# 显示RUL图
+fig = model.plot_rul(
+predictions=predictions,
+eol_threshold=eol_threshold
+)
+st.pyplot(fig)
+
+# 保存预测结果
+predictions_file = os.path.join(OUTPUT_FOLDER, "predictions.csv")
+pd.DataFrame({
+'cycle': range(max_cycle + 1, max_cycle + cycles_to_predict + 1),
+'predicted_soh': predictions
+}).to_csv(predictions_file, index=False)
+
+# 提供下载链接
+with open(predictions_file, "rb") as file:
+st.download_button(
+label="下载预测结果",
+data=file,
+file_name="predictions.csv",
+mime="text/csv"
+)
+
+except Exception as e:
+st.error(f"预测时出错: {str(e)}")
+
+# 导航按钮
+col1, col2 = st.columns(2)
+with col1:
+if st.button("返回模型训练"):
+st.session_state.current_step = 5
+st.rerun()
+with col2:
+if st.button("继续到模型优化"):
+st.session_state.current_step = 7
+st.rerun()
+
+# 7. 模型优化页面
+elif st.session_state.current_step == 7:
+st.title("7. 模型优化")
+
+if st.session_state.model is None:
+st.warning("请先训练模型")
+if st.button("返回预测与评估"):
+st.session_state.current_step = 6
+st.rerun()
+else:
+st.write("选择模型优化选项")
+
+col1, col2 = st.columns(2)
+
+with col1:
+st.subheader("优化方法")
+
+optimization_method = st.selectbox(
+"优化方法",
+["超参数优化", "特征选择", "集成学习"]
+)
+
+if optimization_method == "超参数优化":
+search_method = st.selectbox(
+"搜索方法",
+["网格搜索", "随机搜索", "贝叶斯优化"]
+)
+n_iter = st.slider("搜索迭代次数", 10, 100, 30, 5)
+cv_folds = st.slider("交叉验证折数", 3, 10, 5, 1)
+
+optimization_params = {
+"search_method": search_method,
+"n_iter": n_iter,
+"cv": cv_folds
+}
+
+elif optimization_method == "特征选择":
+selection_method = st.selectbox(
+"选择方法",
+["递归特征消除", "特征重要性", "相关性筛选"]
+)
+n_features = st.slider(
+"选择特征数量", 
+5, 
+len(st.session_state.feature_cols), 
+min(10, len(st.session_state.feature_cols)), 
+1
+)
+
+optimization_params = {
+"selection_method": selection_method,
+"n_features": n_features
+}
+
+elif optimization_method == "集成学习":
+ensemble_method = st.selectbox(
+"集成方法",
+["投票", "堆叠", "加权平均"]
+)
+base_models = st.multiselect(
+"基础模型",
+["SVR", "随机森林", "XGBoost", "LightGBM"],
+default=["SVR", "随机森林", "XGBoost"]
+)
+
+optimization_params = {
+"ensemble_method": ensemble_method,
+"base_models": base_models
+}
+
+with col2:
+st.subheader("评估选项")
+
+# 评估指标
+eval_metric = st.selectbox(
+"优化目标指标",
+["R²", "MAE", "MSE", "RMSE"]
+)
+
+# 交叉验证
+use_cv = st.checkbox("使用交叉验证", value=True)
+
+# 可视化
+show_learning_curve = st.checkbox("显示学习曲线", value=True)
+
+if st.button("执行模型优化"):
+try:
+with st.spinner("正在优化模型..."):
+model = st.session_state.model
+evaluator = ModelEvaluator(model)
+
+# 执行优化
+if optimization_method == "超参数优化":
+optimized_model = evaluator.optimize_hyperparameters(
+search_method=optimization_params["search_method"],
+n_iter=optimization_params["n_iter"],
+cv=optimization_params["cv"],
+scoring=eval_metric.lower()
+)
+
+elif optimization_method == "特征选择":
+optimized_model = evaluator.select_features(
+method=optimization_params["selection_method"],
+n_features=optimization_params["n_features"]
+)
+
+elif optimization_method == "集成学习":
+optimized_model = evaluator.build_ensemble(
+method=optimization_params["ensemble_method"],
+base_models=optimization_params["base_models"]
+)
+
+# 更新会话状态
+st.session_state.model = optimized_model
+
+# 显示优化结果
+st.success("模型优化完成！")
+
+# 显示优化后的评估指标
+st.subheader("优化后的模型评估")
+metrics = optimized_model.evaluate_model()
+
+col1, col2, col3, col4 = st.columns(4)
+col1.metric("R²", f"{metrics['r2']:.4f}")
+col2.metric("MAE", f"{metrics['mae']:.4f}")
+col3.metric("MSE", f"{metrics['mse']:.4f}")
+col4.metric("RMSE", f"{metrics['rmse']:.4f}")
+
+# 显示预测vs实际值图
+st.subheader("预测 vs 实际值")
+fig = optimized_model.plot_prediction_vs_actual()
+st.pyplot(fig)
+
+# 显示学习曲线
+if show_learning_curve:
+st.subheader("学习曲线")
+fig = evaluator.plot_learning_curve(cv=5 if use_cv else None)
+st.pyplot(fig)
+
+# 保存优化后的模型
+model_file = os.path.join(MODELS_FOLDER, "optimized_model.pkl")
+joblib.dump(optimized_model, model_file)
+
+st.info(f"优化后的模型已保存到 {model_file}")
+
+except Exception as e:
+st.error(f"优化模型时出错: {str(e)}")
+
+# 导航按钮
+if st.button("返回预测与评估"):
+st.session_state.current_step = 6
+st.rerun()
+
+# 页脚
+st.markdown("---")
+st.markdown("### 电池寿命预测系统 | 基于机器学习的SOH和RUL预测")
+st.markdown("© 2025 电池健康管理团队")
+st.markdown("© 2025 浙江锋锂新能源科技有限公司-唐光盛团队")
